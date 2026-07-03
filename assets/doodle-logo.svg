@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="82" viewBox="0 0 260 82" role="img" aria-labelledby="title">
+  <title id="title">doodle</title>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M34 58c-17 0-27-11-27-26C7 17 19 7 35 7c15 0 26 9 27 23" stroke="#111" stroke-width="8"/>
+    <path d="M45 28c8 0 15 6 15 15S53 58 44 58 29 51 29 42c0-7 5-14 13-14" stroke="#111" stroke-width="7"/>
+    <path d="M64 39c11-4 10 18 21 13 8-3 5-24 17-20 10 3 7 24 18 20 8-2 7-20 17-18 7 1 8 10 8 17" stroke="#898989" stroke-width="8"/>
+  </g>
+  <text x="6" y="78" fill="#111" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Apple SD Gothic Neo', sans-serif" font-size="16" font-weight="700" letter-spacing="0">doodle</text>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">doodle</title>
+  <rect width="512" height="512" rx="112" fill="#fff"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M181 326c-80 0-126-52-126-123C55 132 111 83 186 83c72 0 123 45 128 108" stroke="#111" stroke-width="36"/>
+    <path d="M229 184c41 0 72 31 72 72s-31 72-72 72-72-31-72-72c0-34 24-67 62-71" stroke="#111" stroke-width="34"/>
+    <path d="M326 237c34-13 31 63 64 49 25-11 17-70 50-58 23 8 19 58 45 54" stroke="#8f8f92" stroke-width="34"/>
+  </g>
+</svg>

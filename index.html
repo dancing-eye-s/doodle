@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="doodle" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>끄적끄적 doodle</title>
+    <meta
+      name="description"
+      content="매일 한 주제로 둘만의 낙서를 주고받는 끄적끄적 doodle 모바일 웹"
+    />
+    <link rel="manifest" href="./manifest.webmanifest?v=doodle-ui-3" />
+    <link rel="apple-touch-icon" href="./assets/doodle-icon-512.png" />
+    <link rel="icon" href="./assets/doodle-icon.svg" />
+    <link rel="stylesheet" href="./styles.css?v=doodle-ui-3" />
+  </head>
+  <body>
+    <main class="app-shell" aria-labelledby="page-title">
+      <section class="screen screen--welcome is-active" data-screen="welcome">
+        <header class="brand-row" aria-label="끄적끄적 doodle">
+          <img class="app-icon" src="./assets/doodle-icon.svg" alt="doodle 앱 아이콘" />
+          <div>
+            <p class="brand-kicker">doodle</p>
+            <h1 id="page-title">끄적끄적</h1>
+          </div>
+        </header>
+
+        <div class="hero-stage" aria-label="둘만의 낙서 미리보기">
+          <div class="paper-card paper-card--mine">
+            <span class="card-label">나의 캔버스</span>
+            <svg viewBox="0 0 180 180" role="img" aria-label="하트 낙서">
+              <path
+                class="doodle-line doodle-line--heart"
+                d="M90 135 C45 100 36 67 58 49 C75 35 91 48 90 67 C89 47 108 35 124 49 C147 70 135 101 90 135 Z"
+              />
+              <path class="doodle-line doodle-line--small" d="M47 124 C61 113 70 113 84 125" />
+            </svg>
+          </div>
+
+          <div class="paper-card paper-card--yours">
+            <span class="card-label">상대방의 캔버스</span>
+            <svg viewBox="0 0 180 180" role="img" aria-label="별 낙서">
+              <path
+                class="doodle-line doodle-line--star"
+                d="M88 36 L103 73 L143 76 L112 101 L122 140 L88 118 L54 140 L64 101 L33 76 L73 73 Z"
+              />
+              <path class="doodle-line doodle-line--small" d="M126 45 C136 40 145 42 151 51" />
+            </svg>
+          </div>
+
+          <p class="prompt-chip">오늘의 주제는... 요즘 내 기분</p>
+        </div>
+
+        <section class="copy-block" aria-label="서비스 소개">
+          <p class="eyebrow">서로를 떠올리는 가장 귀여운 방법</p>
+          <h2 class="headline-copy">
+            <span>매일 한 주제,</span>
+            <span>둘만의 낙서로 주고받아요.</span>
+          </h2>
+          <p>
+            둘 다 그리기 전까지는 비밀이에요. 같은 질문을 어떻게 다르게 봤는지,
+            열리는 순간 함께 확인해요.
+          </p>
+        </section>
+
+        <nav class="action-panel" aria-label="시작하기">
+          <button class="primary-action" type="button" data-action="open-join">초대 코드 입력</button>
+          <button class="secondary-action" type="button" data-action="open-create">초대 코드 만들기</button>
+        </nav>
+
+        <aside class="install-note" data-install-note hidden>
+          Safari에서 공유 버튼을 누르고 홈 화면에 추가하면 앱처럼 열려요.
+        </aside>
+      </section>
+
+      <section class="screen screen--pairing" data-screen="pairing" aria-labelledby="pairing-title">
+        <header class="pairing-topbar">
+          <button class="plain-action" type="button" data-action="back-welcome">처음으로</button>
+          <span class="pairing-brand">doodle</span>
+        </header>
+
+        <img class="pairing-logo" src="./assets/doodle-logo.svg" alt="doodle" />
+
+        <section class="pairing-copy">
+          <h2 id="pairing-title">연인과 연결하기</h2>
+          <p data-pairing-helper>코드를 만들거나 받은 코드를 입력해 둘만의 방을 만들어요.</p>
+        </section>
+
+        <div class="stack pairing-stack">
+          <section class="setup-panel" data-pair-mode="create">
+            <h3>내 초대 코드</h3>
+            <p class="pairing-note" data-create-note>코드를 만들면 상대가 이 코드로 들어올 수 있어요.</p>
+            <button class="invite-create-action" type="button" data-action="create-invite">
+              내 코드 만들기
+            </button>
+            <div class="invite-code-row" data-invite-code-row hidden>
+              <output class="invite-code" data-invite-code></output>
+              <button class="copy-action" type="button" data-action="copy-invite">복사</button>
+            </div>
+          </section>
+
+          <div class="pair-divider" aria-hidden="true"><span>또는</span></div>
+
+          <form class="setup-panel" data-form="accept">
+            <h3>상대방 코드 입력</h3>
+            <p class="pairing-note">상대가 보내준 초대 코드를 입력해 주세요.</p>
+            <label class="field">
+              <span class="visually-hidden">상대방 코드</span>
+              <input
+                name="invite_code"
+                inputmode="latin"
+                autocapitalize="characters"
+                autocomplete="one-time-code"
+                maxlength="8"
+                placeholder="코드를 입력하세요."
+                required
+              />
+            </label>
+            <button class="pairing-submit" type="submit">연결하기</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="screen" data-screen="today" aria-labelledby="today-title">
+        <header class="app-topbar">
+          <div>
+            <p class="eyebrow" data-today-date>오늘</p>
+            <h2 id="today-title">오늘의 끄적끄적</h2>
+          </div>
+          <button class="mini-action" type="button" data-action="refresh">다시 불러오기</button>
+        </header>
+
+        <section class="prompt-panel">
+          <p class="eyebrow">오늘의 주제</p>
+          <h3 data-prompt-text>주제를 불러오는 중...</h3>
+          <p class="muted" data-prompt-meta></p>
+        </section>
+
+        <section class="status-grid" aria-label="제출 상태">
+          <article class="status-card">
+            <span>나</span>
+            <strong data-my-status>대기</strong>
+          </article>
+          <article class="status-card">
+            <span>상대</span>
+            <strong data-partner-status>대기</strong>
+          </article>
+        </section>
+
+        <section class="reveal-panel" data-reveal-panel>
+          <p data-reveal-copy>둘 다 그리면 동시에 열려요.</p>
+          <div class="drawing-pair" data-drawing-pair></div>
+        </section>
+
+        <nav class="bottom-actions" aria-label="오늘 행동">
+          <button class="primary-action" type="button" data-action="open-draw">오늘 주제 그리기</button>
+          <button class="secondary-action" type="button" data-action="poke">콕 찌르기</button>
+          <button class="secondary-action" type="button" data-action="open-archive">그림일기 보기</button>
+        </nav>
+      </section>
+
+      <section class="screen screen--draw" data-screen="draw" aria-labelledby="draw-title">
+        <header class="app-topbar">
+          <button class="icon-button" type="button" data-action="back-today" aria-label="오늘 화면으로">
+            ←
+          </button>
+          <div>
+            <p class="eyebrow">그리기</p>
+            <h2 id="draw-title">그림으로 답하기</h2>
+          </div>
+        </header>
+
+        <p class="draw-prompt" data-draw-prompt></p>
+        <canvas class="drawing-canvas" data-canvas width="900" height="900" aria-label="그림 캔버스"></canvas>
+
+        <div class="tool-row" aria-label="그림 도구">
+          <button class="swatch is-selected" type="button" data-color="#30262a" aria-label="검정"></button>
+          <button class="swatch swatch--pink" type="button" data-color="#f05d86" aria-label="분홍"></button>
+          <button class="swatch swatch--yellow" type="button" data-color="#f4b942" aria-label="노랑"></button>
+          <button class="swatch swatch--mint" type="button" data-color="#55b989" aria-label="초록"></button>
+          <button class="tool-button" type="button" data-action="undo">되돌리기</button>
+          <button class="tool-button" type="button" data-action="clear-canvas">지우기</button>
+        </div>
+
+        <p class="policy-copy">
+          제출 후 당일 안에 한 번만 수정할 수 있어요. 재제출은 수정으로 대신해요.
+        </p>
+
+        <button class="primary-action" type="button" data-action="submit-drawing">그림 보내기</button>
+      </section>
+
+      <section class="screen" data-screen="archive" aria-labelledby="archive-title">
+        <header class="app-topbar">
+          <button class="icon-button" type="button" data-action="back-today" aria-label="오늘 화면으로">
+            ←
+          </button>
+          <div>
+            <p class="eyebrow">그림일기</p>
+            <h2 id="archive-title">쌓여가는 그림일기</h2>
+          </div>
+        </header>
+        <div class="archive-list" data-archive-list></div>
+      </section>
+
+      <div class="toast" data-toast hidden></div>
+    </main>
+
+    <script src="./script.js?v=doodle-ui-3"></script>
+  </body>
+</html>

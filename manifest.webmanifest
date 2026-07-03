@@ -1,0 +1,18 @@
+{
+  "name": "끄적끄적 doodle",
+  "short_name": "doodle",
+  "description": "매일 한 주제로 둘만의 낙서를 주고받는 끄적끄적 doodle 모바일 웹",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "./assets/doodle-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+.env
+data/
+.vercel/
+assets/app-icon-512.jpg
+preview-first-screen.png
