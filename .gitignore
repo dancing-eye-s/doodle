@@ -1,6 +1,8 @@
 .env
+.env.local
 data/
 .vercel/
 assets/app-icon-512.jpg
 preview-first-screen.png
 .vercel
+.env*

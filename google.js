@@ -197,6 +197,23 @@ async function getSheetTitle(token) {
   return cachedSheetTitle;
 }
 
+async function getSheetTitles(token) {
+  const sheetsId = process.env.GOOGLE_SHEETS_ID;
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}?fields=sheets.properties.title`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`Failed to read spreadsheet: ${payload.error?.message || response.status}`);
+  }
+
+  return (payload.sheets || [])
+    .map((sheet) => sheet.properties?.title)
+    .filter(Boolean);
+}
+
 async function appendSheetRow(values) {
   const token = await getAccessToken();
   const sheetsId = process.env.GOOGLE_SHEETS_ID;
@@ -263,6 +280,78 @@ async function deleteDriveFile(fileId) {
   }
 }
 
+async function listDriveFolderFiles() {
+  const token = await resolveDriveToken();
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  const files = [];
+  let pageToken = "";
+
+  do {
+    const params = new URLSearchParams({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: "nextPageToken,files(id,name,mimeType)",
+      pageSize: "1000",
+      includeItemsFromAllDrives: "true",
+      supportsAllDrives: "true",
+    });
+
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(`Drive list failed: ${payload.error?.message || response.status}`);
+    }
+
+    files.push(...(payload.files || []));
+    pageToken = payload.nextPageToken || "";
+  } while (pageToken);
+
+  return files;
+}
+
+async function clearSheets() {
+  const token = await getAccessToken();
+  const sheetsId = process.env.GOOGLE_SHEETS_ID;
+  const titles = await getSheetTitles(token);
+  let sheetsCleared = 0;
+
+  for (const title of titles) {
+    const range = encodeURIComponent(`${title}!A:Z`);
+    const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/${range}:clear`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(`Sheets clear failed: ${payload.error?.message || response.status}`);
+    }
+
+    sheetsCleared += 1;
+  }
+
+  cachedSheetTitle = null;
+  return { sheetsCleared };
+}
+
+async function resetGoogleData() {
+  const files = await listDriveFolderFiles();
+
+  for (const file of files) {
+    await deleteDriveFile(file.id);
+  }
+
+  return {
+    driveFilesDeleted: files.length,
+    ...(await clearSheets()),
+  };
+}
+
 // A real write+delete round trip is the only way to know Drive uploads will
 // actually work: a service account can have "editor" access to a folder and
 // still get rejected on upload because it has no storage quota of its own.
@@ -298,6 +387,7 @@ module.exports = {
   uploadDriveFile,
   downloadDriveFile,
   deleteDriveFile,
+  resetGoogleData,
   oauthConfigured,
   userAuthorized,
   getAuthUrl,
