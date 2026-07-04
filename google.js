@@ -90,6 +90,95 @@ async function checkAuth() {
   return true;
 }
 
+const OAUTH_SCOPE = "https://www.googleapis.com/auth/drive";
+let cachedUserToken = null;
+
+function oauthConfigured() {
+  return Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+}
+
+function userAuthorized() {
+  return Boolean(process.env.GOOGLE_OAUTH_REFRESH_TOKEN);
+}
+
+function getAuthUrl(redirectUri) {
+  const params = new URLSearchParams({
+    client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: OAUTH_SCOPE,
+    access_type: "offline",
+    prompt: "consent",
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}
+
+async function exchangeCodeForTokens(code, redirectUri) {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+      client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    }),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`OAuth exchange failed: ${payload.error_description || payload.error || response.status}`);
+  }
+
+  return payload;
+}
+
+// The service account has to sign its own JWT; a person's OAuth token instead
+// refreshes from the refresh_token we got once during consent. Files created
+// with this token are owned by the real Google account, so they count against
+// that account's own 15GB, sidestepping the service account's 0-quota wall.
+async function getUserAccessToken() {
+  const now = Math.floor(Date.now() / 1000);
+
+  if (cachedUserToken && cachedUserToken.expiresAt > now + 60) {
+    return cachedUserToken.accessToken;
+  }
+
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+
+  if (!refreshToken) {
+    throw new Error("Google OAuth is not authorized yet (no refresh token).");
+  }
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: process.env.GOOGLE_OAUTH_CLIENT_ID,
+      client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`OAuth refresh failed: ${payload.error_description || payload.error || response.status}`);
+  }
+
+  cachedUserToken = { accessToken: payload.access_token, expiresAt: now + payload.expires_in };
+  return cachedUserToken.accessToken;
+}
+
+// Drive reads/writes prefer the real account's OAuth token (so uploads count
+// against the person's own quota); Sheets keeps using the service account
+// since that already works and doesn't need the human in the loop.
+async function resolveDriveToken() {
+  if (userAuthorized()) return getUserAccessToken();
+  return getAccessToken();
+}
+
 async function getSheetTitle(token) {
   if (cachedSheetTitle) return cachedSheetTitle;
 
@@ -132,7 +221,7 @@ async function appendSheetRow(values) {
 }
 
 async function uploadDriveFile({ name, mimeType, buffer }) {
-  const token = await getAccessToken();
+  const token = await resolveDriveToken();
   const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
   const boundary = `doodle-${crypto.randomUUID()}`;
   const metadata = JSON.stringify({ name, parents: [folderId] });
@@ -162,7 +251,7 @@ async function uploadDriveFile({ name, mimeType, buffer }) {
 }
 
 async function deleteDriveFile(fileId) {
-  const token = await getAccessToken();
+  const token = await resolveDriveToken();
   const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
@@ -188,7 +277,7 @@ async function checkDriveWrite() {
 }
 
 async function downloadDriveFile(fileId) {
-  const token = await getAccessToken();
+  const token = await resolveDriveToken();
   const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -209,4 +298,8 @@ module.exports = {
   uploadDriveFile,
   downloadDriveFile,
   deleteDriveFile,
+  oauthConfigured,
+  userAuthorized,
+  getAuthUrl,
+  exchangeCodeForTokens,
 };

@@ -681,8 +681,10 @@ async function googleStatus() {
     service_account_present: Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
     sheets_id_present: Boolean(process.env.GOOGLE_SHEETS_ID),
     drive_folder_id_present: Boolean(process.env.GOOGLE_DRIVE_FOLDER_ID),
+    oauth_client_configured: google.oauthConfigured(),
+    oauth_user_authorized: google.userAuthorized(),
     configured,
-    storage_mode: configured ? "google" : process.env.VERCEL ? "ephemeral-mock" : "local-mock",
+    storage_mode: configured ? (google.userAuthorized() ? "google-oauth" : "google-service-account") : process.env.VERCEL ? "ephemeral-mock" : "local-mock",
   };
 
   if (configured) {
@@ -713,9 +715,69 @@ async function googleStatus() {
   return status;
 }
 
+function currentOrigin(request) {
+  const proto = request.headers["x-forwarded-proto"] || "http";
+  return `${proto}://${request.headers.host}`;
+}
+
+function oauthRedirectUri(request) {
+  return `${currentOrigin(request)}/api/google/oauth/callback`;
+}
+
+async function handleOAuthStart(request, response) {
+  if (!google.oauthConfigured()) {
+    sendError(response, 400, "GOOGLE_OAUTH_CLIENT_ID/SECRET이 아직 설정되지 않았어요.");
+    return;
+  }
+
+  const authUrl = google.getAuthUrl(oauthRedirectUri(request));
+  response.writeHead(302, { Location: authUrl });
+  response.end();
+}
+
+async function handleOAuthCallback(request, response) {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  const code = url.searchParams.get("code");
+  const error = url.searchParams.get("error");
+
+  if (error) {
+    response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end(`Google가 인증을 거부했어요: ${error}`);
+    return;
+  }
+
+  if (!code) {
+    response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("code 파라미터가 없어요.");
+    return;
+  }
+
+  try {
+    const tokens = await google.exchangeCodeForTokens(code, oauthRedirectUri(request));
+    const refreshTokenNote = tokens.refresh_token
+      ? tokens.refresh_token
+      : "(refresh_token이 없어요. 이 계정으로 이미 한 번 동의한 적이 있어서 재발급되지 않았을 수 있어요. Google 계정 -> 보안 -> 타사 액세스에서 이 앱 연결을 해제한 뒤 다시 시도해주세요.)";
+
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end(
+      `<!doctype html><meta charset="utf-8" />` +
+        `<body style="font-family: system-ui; padding: 24px; line-height: 1.6; max-width: 640px; margin: 0 auto;">` +
+        `<h1>연결 완료</h1>` +
+        `<p>아래 값을 복사해서 알려주세요. 이 화면을 벗어나면 다시 볼 수 없어요.</p>` +
+        `<textarea style="width:100%;height:140px;" readonly>${refreshTokenNote}</textarea>` +
+        `</body>`,
+    );
+  } catch (err) {
+    response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end(`토큰 교환 실패: ${err.message}`);
+  }
+}
+
 async function routeApi(request, response, state) {
   const url = new URL(request.url, `http://${request.headers.host}`);
 
+  if (request.method === "GET" && url.pathname === "/api/google/oauth/start") return handleOAuthStart(request, response);
+  if (request.method === "GET" && url.pathname === "/api/google/oauth/callback") return handleOAuthCallback(request, response);
   if (request.method === "POST" && url.pathname === "/api/session") return handleSession(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/invites") return handleCreateInvite(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/invites/accept") return handleAcceptInvite(request, response, state);
