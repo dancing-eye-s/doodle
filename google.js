@@ -2,6 +2,15 @@ const crypto = require("node:crypto");
 
 const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive";
 
+// Every API request is serialized through one queue in server.js, so a single
+// Google call that hangs without responding would deadlock the entire app.
+// Cap each call so a stall degrades into a caught error instead.
+const FETCH_TIMEOUT_MS = 20_000;
+
+function fetch(url, options = {}) {
+  return globalThis.fetch(url, { ...options, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+}
+
 let cachedCredentials = null;
 let cachedToken = null;
 let cachedSheetTitle = null;

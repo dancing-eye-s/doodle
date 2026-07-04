@@ -9,6 +9,8 @@ const appState = {
   today: null,
   chats: [],
   selectedEmoji: "",
+  guestbook: [],
+  guestbookEmoji: "",
   archive: [],
   strokes: [],
   activeStroke: null,
@@ -383,6 +385,8 @@ function stopPolling() {
   }
 }
 
+const ANNIVERSARY_DAYS = new Set([7, 30, 50, 100, 200, 365]);
+
 function renderToday() {
   const today = appState.today;
   $("[data-today-date]").textContent = today.date;
@@ -396,15 +400,75 @@ function renderToday() {
     ? "서로의 낙서가 열렸어요."
     : "둘 다 그리면 동시에 열려요.";
 
+  const partnerLine = $("[data-today-partner]");
+  const partnerName = today.partner_name || "";
+  if (partnerName && today.day_index) {
+    partnerLine.textContent = `${partnerName}님과 함께한 지 ${today.day_index}일째`;
+    partnerLine.hidden = false;
+  } else {
+    partnerLine.hidden = true;
+  }
+
+  const partnerStatusLabelEl = $("[data-partner-status]");
+  if (partnerStatusLabelEl && partnerName) {
+    partnerStatusLabelEl.closest(".status-card").querySelector("span").textContent = partnerName;
+  }
+
+  const anniversaryBanner = $("[data-anniversary-banner]");
+  if (today.day_index && ANNIVERSARY_DAYS.has(today.day_index)) {
+    anniversaryBanner.textContent = `🎉 오늘은 둘이 함께한 지 ${today.day_index}일째 되는 날이에요!`;
+    anniversaryBanner.hidden = false;
+  } else {
+    anniversaryBanner.hidden = true;
+  }
+
+  const pokeBanner = $("[data-poke-banner]");
+  if (today.partner_poke) {
+    pokeBanner.textContent = `👉 ${today.partner_poke.from_name || "상대"}님이 콕 찔렀어요! 오늘 낙서를 기다리고 있어요.`;
+    pokeBanner.hidden = false;
+  } else {
+    pokeBanner.hidden = true;
+  }
+
+  renderMemoryPanel(today.memory);
+
   const pair = $("[data-drawing-pair]");
   pair.innerHTML = "";
 
   if (today.revealed) {
     pair.append(renderDrawingCard("나", today.my_drawing));
-    pair.append(renderDrawingCard("상대", today.partner_drawing));
+    pair.append(renderDrawingCard(partnerName || "상대", today.partner_drawing));
   }
 
   renderTodayPrimaryRow(today);
+}
+
+function renderMemoryPanel(memory) {
+  const panel = $("[data-memory-panel]");
+
+  if (!memory || (!memory.my_drawing && !memory.partner_drawing)) {
+    panel.hidden = true;
+    return;
+  }
+
+  $("[data-memory-title]").textContent = `${memory.date} · ${memory.prompt_text || "그날의 질문"}`;
+
+  const mine = $("[data-memory-mine]");
+  const partner = $("[data-memory-partner]");
+  [
+    [mine, memory.my_drawing],
+    [partner, memory.partner_drawing],
+  ].forEach(([img, drawing]) => {
+    if (drawing && drawing.status !== "deleted" && drawing.file_url) {
+      img.src = drawing.file_url;
+      img.hidden = false;
+    } else {
+      img.removeAttribute("src");
+      img.hidden = true;
+    }
+  });
+
+  panel.hidden = false;
 }
 
 function renderTodayPrimaryRow(today) {
@@ -563,6 +627,113 @@ function updateEmojiSelection() {
   });
 }
 
+function guestbookMonthKey() {
+  if (!appState.archiveMonth) return "";
+  return `${appState.archiveMonth.year}-${String(appState.archiveMonth.month).padStart(2, "0")}`;
+}
+
+async function loadGuestbook() {
+  const panel = $("[data-guestbook-panel]");
+  const monthKey = guestbookMonthKey();
+
+  if (!appState.today?.couple || !monthKey) {
+    panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  $("[data-guestbook-title]").textContent = `${appState.archiveMonth.year}년 ${appState.archiveMonth.month}월에 남기는 말`;
+  const payload = await api(`/api/chats?date=${encodeURIComponent(monthKey)}`);
+  appState.guestbook = payload.chats || [];
+  renderGuestbook();
+}
+
+function renderGuestbook() {
+  const list = $("[data-guestbook-list]");
+  list.innerHTML = "";
+
+  if (!appState.guestbook.length) {
+    const empty = document.createElement("p");
+    empty.className = "chat-empty";
+    empty.textContent = "아직 이 달의 방명록이 비어있어요. 첫 기억을 남겨보세요.";
+    list.append(empty);
+    return;
+  }
+
+  appState.guestbook.forEach((chat) => {
+    const item = document.createElement("article");
+    item.className = "chat-item";
+
+    const meta = document.createElement("p");
+    meta.className = "chat-meta";
+    meta.textContent = chat.profile_name || "끄적러";
+    item.append(meta);
+
+    const body = document.createElement("p");
+    body.className = "chat-body";
+    body.textContent = `${chat.emoji ? `${chat.emoji} ` : ""}${chat.text || ""}`.trim();
+    item.append(body);
+
+    if (chat.can_edit) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "chat-edit";
+      edit.dataset.guestbookChatId = chat.chat_id;
+      edit.textContent = "수정";
+      item.append(edit);
+    }
+
+    list.append(item);
+  });
+}
+
+async function createGuestbookEntry(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const input = form.elements.guestbook_text;
+  const text = String(input.value || "").trim();
+
+  await api("/api/chats", {
+    method: "POST",
+    body: JSON.stringify({
+      date: guestbookMonthKey(),
+      text,
+      emoji: appState.guestbookEmoji,
+    }),
+  });
+  input.value = "";
+  appState.guestbookEmoji = "";
+  updateGuestbookEmojiSelection();
+  showToast("방명록을 남겼어요.");
+  await loadGuestbook();
+}
+
+async function editGuestbookEntry(chatId) {
+  const chat = appState.guestbook.find((item) => item.chat_id === chatId);
+
+  if (!chat) return;
+
+  const text = window.prompt("방명록을 수정해 주세요.", chat.text || "");
+  if (text === null) return;
+
+  await api("/api/chats/update", {
+    method: "POST",
+    body: JSON.stringify({
+      chat_id: chat.chat_id,
+      text,
+      emoji: chat.emoji,
+    }),
+  });
+  showToast("방명록을 수정했어요.");
+  await loadGuestbook();
+}
+
+function updateGuestbookEmojiSelection() {
+  $$("[data-guestbook-emoji]").forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.guestbookEmoji === appState.guestbookEmoji);
+  });
+}
+
 function parseDateKey(dateKey) {
   const [year, month, day] = dateKey.split("-").map(Number);
   return { year, month, day };
@@ -603,6 +774,7 @@ function changeArchiveMonth(delta) {
 function renderArchiveCalendar() {
   clearArchiveCellTimers();
   $("[data-archive-detail]").hidden = true;
+  loadGuestbook().catch(() => {});
 
   const grid = $("[data-calendar-grid]");
   const nav = $("[data-calendar-nav]");
@@ -835,7 +1007,53 @@ async function pokePartner() {
     method: "POST",
     body: JSON.stringify({}),
   });
-  showToast("상대에게 콕 찔렀어요.");
+  showToast("상대에게 콕 찔렀어요. 상대 화면에 표시돼요.");
+}
+
+async function refreshStorageStatus() {
+  const statusEl = $("[data-storage-status]");
+
+  if (!statusEl) return;
+
+  try {
+    const status = await api("/api/google/status");
+
+    if (status.drive_write_ok && status.sheets_database_ok !== false) {
+      statusEl.textContent = "✅ 그림과 기록이 Google에 안전하게 저장되고 있어요.";
+    } else if (status.configured) {
+      statusEl.textContent = "⚠️ Google 연결은 되어 있지만 일부 저장이 제한되고 있어요.";
+    } else {
+      statusEl.textContent = "⚠️ Google 저장이 아직 설정되지 않아 기기에만 임시 저장돼요.";
+    }
+  } catch {
+    statusEl.textContent = "저장 상태를 불러오지 못했어요.";
+  }
+}
+
+async function leaveCouple() {
+  if (!appState.today?.couple) {
+    showToast("연결된 방이 없어요.");
+    return;
+  }
+
+  const partnerName = appState.today.partner_name || "상대";
+
+  if (
+    !window.confirm(
+      `${partnerName}님과의 방을 나갈까요? 지금까지의 그림과 기록은 Google에 그대로 남고, 새 초대 코드로 다시 연결할 수 있어요.`,
+    )
+  ) {
+    return;
+  }
+
+  await api("/api/couples/leave", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  appState.today = null;
+  stopPolling();
+  showToast("방을 나왔어요. 기록은 안전하게 보관돼요.");
+  await bootstrap();
 }
 
 async function openArchive() {
@@ -1069,8 +1287,25 @@ function wireEvents() {
   $('[data-action="refresh"]').addEventListener("click", safe(loadToday));
   $('[data-action="poke"]').addEventListener("click", safe(pokePartner));
   $('[data-action="open-archive"]').addEventListener("click", safe(openArchive));
-  $('[data-action="open-settings"]').addEventListener("click", () => showScreen("settings"));
+  $('[data-action="open-settings"]').addEventListener("click", () => {
+    showScreen("settings");
+    refreshStorageStatus().catch(() => {});
+  });
+  $('[data-action="leave-couple"]').addEventListener("click", safe(leaveCouple));
   $('[data-form="chat"]').addEventListener("submit", safe(createChat));
+  $('[data-form="guestbook"]').addEventListener("submit", safe(createGuestbookEntry));
+  $("[data-guestbook-list]").addEventListener("click", safe(async (event) => {
+    const button = event.target.closest("[data-guestbook-chat-id]");
+    if (!button) return;
+    await editGuestbookEntry(button.dataset.guestbookChatId);
+  }));
+  $$("[data-guestbook-emoji]").forEach((button) => {
+    button.addEventListener("click", () => {
+      appState.guestbookEmoji =
+        appState.guestbookEmoji === button.dataset.guestbookEmoji ? "" : button.dataset.guestbookEmoji;
+      updateGuestbookEmojiSelection();
+    });
+  });
   $("[data-chat-list]").addEventListener("click", safe(async (event) => {
     const button = event.target.closest("[data-chat-id]");
     if (!button) return;

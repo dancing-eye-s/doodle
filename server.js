@@ -24,6 +24,7 @@ const DEFAULT_STATE = {
   sessions: [],
   drawings: [],
   chats: [],
+  pokes: [],
   events: [],
   errors: [],
 };
@@ -244,6 +245,27 @@ function buildStateFromEvents(events) {
 
     if (["chat_created", "chat_updated"].includes(event.event_type) && payload.chat) {
       upsertById(state.chats, "chat_id", payload.chat.chat_id, payload.chat);
+      return;
+    }
+
+    if (event.event_type === "poke_sent" && payload.couple_id && payload.user_id) {
+      state.pokes.push({
+        poke_id: payload.poke_id || event.event_id,
+        couple_id: payload.couple_id,
+        from_user_id: payload.user_id,
+        from_name: payload.profile_name || "",
+        date: payload.date || "",
+        created_at: event.created_at,
+      });
+      return;
+    }
+
+    if (event.event_type === "couple_left" && payload.couple_id) {
+      const couple = state.couples.find((item) => item.couple_id === payload.couple_id);
+      if (couple) {
+        couple.status = "ended";
+        couple.ended_at = event.created_at;
+      }
     }
   });
 
@@ -513,15 +535,59 @@ async function getTodayContext(state, user, relationshipType = "close") {
     });
   }
 
+  const partner = state.users.find((item) => item.user_id === partnerId) || null;
+  const partnerPoke = latestPartnerPokeToday(state, couple.couple_id, user.user_id, date);
+
   return {
     user,
     couple,
     date,
+    day_index: session.day_index,
+    partner_name: partner?.display_name || "",
     prompt,
     session,
     my_drawing: exposeDrawing(myDrawing, date),
     partner_drawing: exposeDrawing(partnerDrawing, date),
     revealed: Boolean(session.revealed_at),
+    partner_poke: partnerPoke,
+    memory: pickMemorySession(state, couple, user.user_id, date, prompts),
+  };
+}
+
+function latestPartnerPokeToday(state, coupleId, myUserId, date) {
+  const pokes = state.pokes
+    .filter((poke) => poke.couple_id === coupleId && poke.from_user_id !== myUserId && poke.date === date)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const poke = pokes[0];
+  return poke ? { from_name: poke.from_name, created_at: poke.created_at } : null;
+}
+
+// "그날의 우리" memory replay: pick one past revealed day. Seeded by date so
+// the same memory stays up all day instead of flickering on every 7s poll.
+function pickMemorySession(state, couple, userId, today, prompts) {
+  const revealedPast = state.sessions
+    .filter((session) => session.couple_id === couple.couple_id && session.revealed_at && session.date < today)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (!revealedPast.length) return null;
+
+  let seed = 0;
+  for (const char of `${couple.couple_id}${today}`) {
+    seed = (seed * 31 + char.charCodeAt(0)) % 100_000;
+  }
+
+  const session = revealedPast[seed % revealedPast.length];
+  const partnerId = couple.user_a_id === userId ? couple.user_b_id : couple.user_a_id;
+  const myDrawing = drawingFor(state, session.session_id, userId);
+  const partnerDrawing = drawingFor(state, session.session_id, partnerId);
+
+  return {
+    date: session.date,
+    day_index: session.day_index,
+    prompt_id: session.prompt_id,
+    prompt_text: prompts.find((prompt) => prompt.prompt_id === session.prompt_id)?.text_ko || "",
+    my_drawing: exposeDrawing(myDrawing, session.date),
+    partner_drawing: exposeDrawing(partnerDrawing, session.date),
   };
 }
 
@@ -888,18 +954,53 @@ async function handlePoke(request, response, state) {
     throw new Error("상대와 먼저 연결해주세요.");
   }
 
+  const poke = {
+    poke_id: id("poke"),
+    couple_id: couple.couple_id,
+    from_user_id: user.user_id,
+    from_name: user.display_name,
+    date: todayKst(),
+    created_at: nowIso(),
+  };
+  state.pokes.push(poke);
   addEvent(state, "poke_sent", {
+    poke_id: poke.poke_id,
     user_id: user.user_id,
     profile_name: user.display_name,
     couple_id: couple.couple_id,
+    date: poke.date,
   });
   sendJson(response, 200, { ok: true });
 }
 
+async function handleLeaveCouple(request, response, state) {
+  const user = ensureUser(state, getDeviceId(request));
+  const couple = coupleForUser(state, user.user_id);
+
+  if (!couple) {
+    throw new Error("연결된 방이 없어요.");
+  }
+
+  couple.status = "ended";
+  couple.ended_at = nowIso();
+  addEvent(state, "couple_left", {
+    user_id: user.user_id,
+    profile_name: user.display_name,
+    couple_id: couple.couple_id,
+  });
+  sendJson(response, 200, { ok: true, couple_id: couple.couple_id });
+}
+
+// Chats accept two date shapes: YYYY-MM-DD for daily comments under a
+// drawing, and YYYY-MM for the monthly guestbook under the archive calendar.
+function normalizeChatDate(raw) {
+  const date = String(raw || "").trim();
+  return /^\d{4}-\d{2}(-\d{2})?$/.test(date) ? date : todayKst();
+}
+
 function dateFromQueryOrToday(request) {
   const url = new URL(request.url, `http://${request.headers.host}`);
-  const date = String(url.searchParams.get("date") || todayKst()).trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayKst();
+  return normalizeChatDate(url.searchParams.get("date") || todayKst());
 }
 
 async function handleGetChats(request, response, state) {
@@ -930,7 +1031,7 @@ async function handleCreateChat(request, response, state) {
 
   const text = String(body.text || "").trim().slice(0, 140);
   const emoji = String(body.emoji || "").trim().slice(0, 4);
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || "")) ? String(body.date) : todayKst();
+  const date = normalizeChatDate(body.date);
 
   if (!text && !emoji) {
     throw new Error("댓글이나 이모티콘을 남겨주세요.");
@@ -1167,6 +1268,7 @@ async function routeApi(request, response, state) {
   if (request.method === "POST" && url.pathname === "/api/drawings/submit") return handleSubmitDrawing(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/drawings/delete") return handleDeleteDrawing(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/poke") return handlePoke(request, response, state);
+  if (request.method === "POST" && url.pathname === "/api/couples/leave") return handleLeaveCouple(request, response, state);
   if (request.method === "GET" && url.pathname === "/api/chats") return handleGetChats(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/chats") return handleCreateChat(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/chats/update") return handleUpdateChat(request, response, state);

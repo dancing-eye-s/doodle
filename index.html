@@ -159,9 +159,13 @@
           <div>
             <p class="eyebrow" data-today-date>오늘</p>
             <h2 id="today-title">오늘의 끄적끄적</h2>
+            <p class="today-partner-line" data-today-partner hidden></p>
           </div>
           <button class="mini-action" type="button" data-action="refresh">다시 불러오기</button>
         </header>
+
+        <div class="today-banner today-banner--anniversary" data-anniversary-banner hidden></div>
+        <div class="today-banner today-banner--poke" data-poke-banner hidden></div>
 
         <section class="prompt-panel">
           <p class="eyebrow">오늘의 주제</p>
@@ -183,6 +187,15 @@
         <section class="reveal-panel" data-reveal-panel>
           <p data-reveal-copy>둘 다 그리면 동시에 열려요.</p>
           <div class="drawing-pair" data-drawing-pair></div>
+        </section>
+
+        <section class="memory-panel" data-memory-panel hidden aria-label="그날의 우리">
+          <p class="eyebrow">그날의 우리</p>
+          <h3 data-memory-title></h3>
+          <div class="memory-pair">
+            <img data-memory-mine alt="그날 내 그림" hidden />
+            <img data-memory-partner alt="그날 상대 그림" hidden />
+          </div>
         </section>
 
         <section class="chat-panel" aria-label="오늘 댓글">
@@ -300,6 +313,27 @@
           </div>
           <p class="muted">날짜를 다시 누르면 달력으로 돌아가요.</p>
         </section>
+
+        <section class="chat-panel" data-guestbook-panel hidden aria-label="이달의 방명록">
+          <div class="chat-panel__head">
+            <div>
+              <p class="eyebrow">이달의 방명록</p>
+              <h3 data-guestbook-title>이 달에 남기는 말</h3>
+            </div>
+          </div>
+          <div class="chat-list" data-guestbook-list></div>
+          <form class="chat-form" data-form="guestbook">
+            <input name="guestbook_text" maxlength="140" placeholder="이 달의 기억을 남겨보세요." />
+            <div class="emoji-row" aria-label="이모티콘 선택">
+              <button type="button" data-guestbook-emoji="🙂">🙂</button>
+              <button type="button" data-guestbook-emoji="🥹">🥹</button>
+              <button type="button" data-guestbook-emoji="😆">😆</button>
+              <button type="button" data-guestbook-emoji="♥">♥</button>
+              <button type="button" data-guestbook-emoji="★">★</button>
+            </div>
+            <button class="secondary-action secondary-action--compact" type="submit">방명록 남기기</button>
+          </form>
+        </section>
       </section>
 
       <section class="screen" data-screen="settings" aria-labelledby="settings-title">
@@ -337,7 +371,13 @@
             <span>다크모드</span>
             <input type="checkbox" data-setting="dark_mode" />
           </label>
-          <p class="muted">월별 방명록과 알림 설정은 다음 고도화 단계에서 이곳에 모아둘게요.</p>
+        </section>
+
+        <section class="settings-panel" aria-label="데이터">
+          <p class="eyebrow">데이터</p>
+          <p class="muted" data-storage-status>저장 상태를 확인하는 중...</p>
+          <p class="muted">그림은 Google Drive에, 기록은 Google Sheets에 방별로 저장돼요. 방을 나가도 지금까지의 기록은 지워지지 않아요.</p>
+          <button class="danger-action danger-action--compact" type="button" data-action="leave-couple">방 나가기</button>
         </section>
       </section>
 

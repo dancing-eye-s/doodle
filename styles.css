@@ -442,6 +442,7 @@ h3 {
 .prompt-panel,
 .reveal-panel,
 .chat-panel,
+.memory-panel,
 .archive-detail,
 .settings-panel {
   padding: 20px;
@@ -451,11 +452,76 @@ h3 {
   box-shadow: none;
 }
 
+.today-partner-line {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.today-banner {
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.today-banner--anniversary {
+  background: rgba(255, 216, 111, 0.5);
+  color: #6b5410;
+}
+
+.today-banner--poke {
+  background: rgba(255, 142, 170, 0.28);
+  color: #a13c5c;
+}
+
+:root[data-theme="dark"] .today-banner--anniversary {
+  background: rgba(255, 216, 111, 0.22);
+  color: #ffd86f;
+}
+
+:root[data-theme="dark"] .today-banner--poke {
+  background: rgba(255, 142, 170, 0.2);
+  color: #ff9eb8;
+}
+
+.memory-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.memory-panel h3 {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.memory-pair {
+  display: flex;
+  gap: 10px;
+}
+
+.memory-pair img {
+  flex: 1;
+  min-width: 0;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+:root[data-theme="dark"] .memory-pair img {
+  background: #2a2a2e;
+}
+
 :root[data-theme="dark"] .setup-panel,
 :root[data-theme="dark"] .profile-panel,
 :root[data-theme="dark"] .prompt-panel,
 :root[data-theme="dark"] .reveal-panel,
 :root[data-theme="dark"] .chat-panel,
+:root[data-theme="dark"] .memory-panel,
 :root[data-theme="dark"] .archive-detail,
 :root[data-theme="dark"] .settings-panel,
 :root[data-theme="dark"] .paper-card,
