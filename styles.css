@@ -326,6 +326,23 @@ h3 {
   font-size: 14px;
 }
 
+.profile-form__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-form__actions .secondary-action--compact {
+  flex: 3;
+}
+
+.danger-action--compact {
+  flex: 2;
+  min-height: 42px;
+  padding: 0 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .primary-action {
   background: var(--pink);
 }

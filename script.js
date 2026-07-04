@@ -157,6 +157,37 @@ function addProfile() {
   bootstrap();
 }
 
+async function deleteActiveProfile() {
+  const profiles = getProfiles();
+
+  if (profiles.length <= 1) {
+    showToast("최소 하나의 프로필은 있어야 해요.");
+    return;
+  }
+
+  const activeId = getActiveProfileId();
+  const activeProfile = getActiveProfile();
+
+  if (!window.confirm(`'${activeProfile.label}' 프로필을 삭제할까요? 이 기기에서만 지워지고, 이미 만든 방/그림/기록은 그대로 남아요.`)) {
+    return;
+  }
+
+  const remaining = profiles.filter((profile) => profile.profile_id !== activeId);
+  saveProfiles(remaining);
+
+  const nextProfile = remaining[0];
+  localStorage.setItem("doodle_active_profile_id", nextProfile.profile_id);
+  appState.activeProfileId = nextProfile.profile_id;
+  appState.deviceId = nextProfile.device_id;
+  appState.user = null;
+  appState.today = null;
+  appState.strokes = [];
+  stopPolling();
+  renderProfiles();
+  await bootstrap();
+  showToast("프로필을 삭제했어요.");
+}
+
 async function switchProfile(profileId) {
   const profile = getProfiles().find((item) => item.profile_id === profileId);
 
@@ -1014,6 +1045,7 @@ function wireEvents() {
   }));
   $('[data-action="enter-today"]').addEventListener("click", safe(() => loadToday()));
   $('[data-action="add-profile"]').addEventListener("click", addProfile);
+  $('[data-action="delete-profile"]').addEventListener("click", safe(deleteActiveProfile));
   $("[data-profile-list]").addEventListener("click", safe(async (event) => {
     const button = event.target.closest("[data-profile-id]");
     if (!button) return;
