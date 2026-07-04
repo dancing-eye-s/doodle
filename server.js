@@ -370,8 +370,32 @@ async function handleSession(request, response, state) {
   sendJson(response, 200, { user });
 }
 
+function pendingCoupleCreatedBy(state, userId) {
+  return state.couples.find((couple) => couple.status === "pending" && couple.user_a_id === userId);
+}
+
+function openInviteForCouple(state, coupleId) {
+  return state.invites.find((invite) => invite.couple_id === coupleId && invite.status === "open");
+}
+
 async function handleCreateInvite(request, response, state) {
   const user = ensureUser(state, getDeviceId(request));
+
+  if (coupleForUser(state, user.user_id)) {
+    throw new Error("이미 연결된 상대가 있어요.");
+  }
+
+  const existingPending = pendingCoupleCreatedBy(state, user.user_id);
+
+  if (existingPending) {
+    const existingInvite = openInviteForCouple(state, existingPending.couple_id);
+
+    if (existingInvite) {
+      sendJson(response, 200, { invite: { code: existingInvite.code }, couple: existingPending });
+      return;
+    }
+  }
+
   let code = inviteCode();
 
   while (state.invites.some((invite) => invite.code === code && invite.status === "open")) {
@@ -403,11 +427,16 @@ async function handleCreateInvite(request, response, state) {
 async function handleAcceptInvite(request, response, state) {
   const body = await readBody(request);
   const user = ensureUser(state, getDeviceId(request));
+
+  if (coupleForUser(state, user.user_id)) {
+    throw new Error("이미 연결된 상대가 있어요.");
+  }
+
   const code = String(body.code || "").trim().toUpperCase();
   const invite = state.invites.find((item) => item.code === code && item.status === "open");
 
   if (!invite) {
-    throw new Error("초대 코드를 찾지 못했어요.");
+    throw new Error("초대 코드를 찾지 못했어요. 코드를 다시 확인해주세요.");
   }
 
   const couple = state.couples.find((item) => item.couple_id === invite.couple_id);
@@ -427,6 +456,19 @@ async function handleAcceptInvite(request, response, state) {
     couple_id: couple.couple_id,
   });
   sendJson(response, 200, { couple });
+}
+
+async function handleMyInvite(request, response, state) {
+  const user = ensureUser(state, getDeviceId(request));
+
+  if (coupleForUser(state, user.user_id)) {
+    sendJson(response, 200, { invite: null });
+    return;
+  }
+
+  const pendingCouple = pendingCoupleCreatedBy(state, user.user_id);
+  const invite = pendingCouple ? openInviteForCouple(state, pendingCouple.couple_id) : null;
+  sendJson(response, 200, { invite: invite ? { code: invite.code } : null });
 }
 
 async function handleToday(request, response, state) {
@@ -587,7 +629,8 @@ function googleStatus() {
     sheets_id_present: Boolean(process.env.GOOGLE_SHEETS_ID),
     drive_folder_id_present: Boolean(process.env.GOOGLE_DRIVE_FOLDER_ID),
     write_ready: Boolean(process.env.GOOGLE_ACCESS_TOKEN && process.env.GOOGLE_SHEETS_ID),
-    note: "Drive/Sheets write operations require OAuth access token or service account credentials. API key alone is not sufficient.",
+    storage_mode: process.env.VERCEL ? "ephemeral-mock" : "local-mock",
+    note: "Drive/Sheets write operations require OAuth access token or service account credentials; the API key alone is not sufficient. Until those are configured, drawings and logs are written to a local mock folder instead of real Google Drive/Sheets, and on Vercel that mock folder is not guaranteed to persist between requests.",
   };
 }
 
@@ -597,6 +640,7 @@ async function routeApi(request, response, state) {
   if (request.method === "POST" && url.pathname === "/api/session") return handleSession(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/invites") return handleCreateInvite(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/invites/accept") return handleAcceptInvite(request, response, state);
+  if (request.method === "GET" && url.pathname === "/api/invites/mine") return handleMyInvite(request, response, state);
   if (request.method === "GET" && url.pathname === "/api/today") return handleToday(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/drawings/submit") return handleSubmitDrawing(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/drawings/delete") return handleDeleteDrawing(request, response, state);
@@ -608,31 +652,50 @@ async function routeApi(request, response, state) {
   sendError(response, 404, "API 경로를 찾지 못했어요.");
 }
 
-async function appHandler(request, response) {
-  const url = new URL(request.url, `http://${request.headers.host}`);
-  const isApi = url.pathname.startsWith("/api/");
-  const state = isApi ? await readState() : null;
-  const beforeEventCount = state?.events.length || 0;
+// Two people can submit their drawing within the same second. Every API
+// request does a read-modify-write cycle against state.json, so without
+// serializing them a concurrent request pair can read the same snapshot and
+// the second write silently overwrites the first person's submission. This
+// queue forces API requests to run one at a time so that never happens.
+let stateQueue = Promise.resolve();
 
-  try {
-    if (isApi) {
-      await routeApi(request, response, state);
-      await persistNewEvents(state, beforeEventCount);
-      await writeState(state);
-      return;
-    }
+function withState(handler) {
+  const run = async () => {
+    const state = await readState();
+    const beforeEventCount = state.events.length;
 
-    await serveStatic(request, response);
-  } catch (error) {
-    if (state) {
+    try {
+      await handler(state);
+    } catch (error) {
       state.errors.push({
         error_id: id("error"),
         message: error.message,
         created_at: nowIso(),
       });
+      throw error;
+    } finally {
+      await persistNewEvents(state, beforeEventCount);
       await writeState(state);
     }
+  };
 
+  const scheduled = stateQueue.then(run, run);
+  stateQueue = scheduled.catch(() => {});
+  return scheduled;
+}
+
+async function appHandler(request, response) {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  const isApi = url.pathname.startsWith("/api/");
+
+  if (!isApi) {
+    await serveStatic(request, response);
+    return;
+  }
+
+  try {
+    await withState((state) => routeApi(request, response, state));
+  } catch (error) {
     const message = error.message === "request-too-large" ? "요청 데이터가 너무 커요." : error.message;
     sendError(response, 400, message || "서버 오류가 발생했어요.");
   }

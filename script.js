@@ -13,6 +13,7 @@ const appState = {
   width: 10,
   pollTimer: null,
   submitting: false,
+  waitingForPartner: false,
 };
 
 const installNote = $("[data-install-note]");
@@ -93,9 +94,6 @@ function showScreen(name) {
   if (name === "draw") {
     window.requestAnimationFrame(setupCanvas);
   }
-
-  if (name === "today") startPolling();
-  else stopPolling();
 }
 
 function openPairing(mode = "join") {
@@ -144,12 +142,40 @@ async function loadToday() {
   appState.today = payload;
 
   if (!payload.couple) {
-    showScreen("welcome");
+    await showWaitingOrWelcome();
     return;
   }
 
+  appState.waitingForPartner = false;
   renderToday();
   showScreen("today");
+  startPolling(refreshTodaySilently);
+}
+
+async function showWaitingOrWelcome() {
+  const mine = await api("/api/invites/mine");
+
+  if (mine.invite) {
+    appState.waitingForPartner = true;
+    openPairing("create");
+    const helper = $("[data-pairing-helper]");
+    if (helper) helper.textContent = "이미 만들어둔 내 코드예요. 상대가 입력하면 자동으로 연결돼요.";
+    fillInviteCode(mine.invite.code);
+    startPolling(pollWaitingRoom);
+    return;
+  }
+
+  appState.waitingForPartner = false;
+  stopPolling();
+  showScreen("welcome");
+}
+
+async function pollWaitingRoom() {
+  try {
+    await loadToday();
+  } catch {
+    stopPolling();
+  }
 }
 
 async function refreshTodaySilently() {
@@ -161,15 +187,17 @@ async function refreshTodaySilently() {
 
     if (payload.couple) {
       renderToday();
+    } else {
+      await showWaitingOrWelcome();
     }
   } catch {
     stopPolling();
   }
 }
 
-function startPolling() {
+function startPolling(fn) {
   stopPolling();
-  appState.pollTimer = window.setInterval(refreshTodaySilently, 7000);
+  appState.pollTimer = window.setInterval(fn, 7000);
 }
 
 function stopPolling() {
@@ -278,18 +306,24 @@ async function saveDisplayName(event) {
   showToast("이름을 저장했어요.");
 }
 
+function fillInviteCode(code) {
+  const output = $("[data-invite-code]");
+  const row = $("[data-invite-code-row]");
+  const createButton = $('[data-action="create-invite"]');
+  output.textContent = code;
+  row.hidden = false;
+  if (createButton) createButton.hidden = true;
+}
+
 async function createInvite() {
   const payload = await api("/api/invites", {
     method: "POST",
     body: JSON.stringify({}),
   });
-  const output = $("[data-invite-code]");
-  const row = $("[data-invite-code-row]");
-  const createButton = $('[data-action="create-invite"]');
-  output.textContent = payload.invite.code;
-  row.hidden = false;
-  if (createButton) createButton.hidden = true;
-  showToast("초대 코드가 준비됐어요.");
+  fillInviteCode(payload.invite.code);
+  appState.waitingForPartner = true;
+  startPolling(pollWaitingRoom);
+  showToast("초대 코드가 준비됐어요. 상대가 들어오면 자동으로 연결돼요.");
 }
 
 async function copyInviteCode() {
@@ -336,6 +370,7 @@ async function pokePartner() {
 }
 
 async function openArchive() {
+  stopPolling();
   const payload = await api("/api/archive");
   appState.archive = payload.sessions;
   renderArchive();
@@ -531,11 +566,16 @@ function wireEvents() {
     openPairing("create");
     await createInvite();
   }));
-  $('[data-action="back-welcome"]').addEventListener("click", () => showScreen("welcome"));
+  $('[data-action="back-welcome"]').addEventListener("click", () => {
+    appState.waitingForPartner = false;
+    stopPolling();
+    showScreen("welcome");
+  });
   $$('[data-action="back-today"]').forEach((button) => {
     button.addEventListener("click", () => {
       renderToday();
       showScreen("today");
+      startPolling(refreshTodaySilently);
     });
   });
   $('[data-action="create-invite"]').addEventListener("click", safe(createInvite));
@@ -544,6 +584,7 @@ function wireEvents() {
   $('[data-action="poke"]').addEventListener("click", safe(pokePartner));
   $('[data-action="open-archive"]').addEventListener("click", safe(openArchive));
   $('[data-action="open-draw"]').addEventListener("click", () => {
+    stopPolling();
     appState.strokes = [];
     $("[data-draw-prompt]").textContent = appState.today.prompt?.text_ko || "";
     showScreen("draw");
