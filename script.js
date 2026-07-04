@@ -14,6 +14,10 @@ const appState = {
   pollTimer: null,
   submitting: false,
   waitingForPartner: false,
+  archiveSessionsByDate: {},
+  archiveMonth: null,
+  archiveSelectedDate: null,
+  archiveCellTimers: [],
 };
 
 const installNote = $("[data-install-note]");
@@ -228,13 +232,37 @@ function renderToday() {
     pair.append(renderDrawingCard("상대", today.partner_drawing));
   }
 
-  const drawButton = $('[data-action="open-draw"]');
-  if (today.my_drawing?.status && today.my_drawing.status !== "deleted") {
+  renderTodayPrimaryRow(today);
+}
+
+function renderTodayPrimaryRow(today) {
+  const row = $("[data-today-primary-row]");
+  row.innerHTML = "";
+
+  const drawButton = document.createElement("button");
+  drawButton.type = "button";
+  drawButton.className = "primary-action";
+  drawButton.dataset.action = "open-draw";
+
+  const hasLiveDrawing = today.my_drawing?.status && today.my_drawing.status !== "deleted";
+
+  if (hasLiveDrawing) {
     drawButton.textContent = today.my_drawing.can_modify ? "오늘 그림 고치기" : "수정 마감";
     drawButton.disabled = !today.my_drawing.can_modify;
+    row.classList.add("today-primary-row--split");
+    row.append(drawButton);
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "danger-action";
+    deleteButton.dataset.action = "delete-drawing";
+    deleteButton.textContent = "삭제";
+    row.append(deleteButton);
   } else {
     drawButton.textContent = "오늘 주제 그리기";
     drawButton.disabled = false;
+    row.classList.remove("today-primary-row--split");
+    row.append(drawButton);
   }
 }
 
@@ -259,40 +287,204 @@ function renderDrawingCard(label, drawing) {
   image.alt = `${label}의 그림`;
   card.append(image);
 
-  if (label === "나") {
-    const deleteButton = document.createElement("button");
-    deleteButton.className = "tool-button";
-    deleteButton.type = "button";
-    deleteButton.textContent = "삭제";
-    deleteButton.addEventListener("click", deleteDrawing);
-    card.append(deleteButton);
-  }
-
   return card;
 }
 
+function parseDateKey(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return { year, month, day };
+}
+
+function monthLabel(year, month) {
+  return `${year}년 ${month}월`;
+}
+
+function clearArchiveCellTimers() {
+  appState.archiveCellTimers.forEach((timerId) => window.clearInterval(timerId));
+  appState.archiveCellTimers = [];
+}
+
 function renderArchive() {
-  const list = $("[data-archive-list]");
-  list.innerHTML = "";
+  appState.archiveSessionsByDate = Object.fromEntries(
+    appState.archive.map((session) => [session.date, session]),
+  );
+
+  const initialDate = appState.archive[0]
+    ? parseDateKey(appState.archive[0].date)
+    : parseDateKey(appState.today?.date || new Date().toISOString().slice(0, 10));
+  appState.archiveMonth = { year: initialDate.year, month: initialDate.month };
+  appState.archiveSelectedDate = null;
+
+  renderArchiveCalendar();
+}
+
+function changeArchiveMonth(delta) {
+  if (!appState.archiveMonth) return;
+
+  const next = new Date(appState.archiveMonth.year, appState.archiveMonth.month - 1 + delta, 1);
+  appState.archiveMonth = { year: next.getFullYear(), month: next.getMonth() + 1 };
+  appState.archiveSelectedDate = null;
+  renderArchiveCalendar();
+}
+
+function renderArchiveCalendar() {
+  clearArchiveCellTimers();
+  $("[data-archive-detail]").hidden = true;
+
+  const grid = $("[data-calendar-grid]");
+  const nav = $("[data-calendar-nav]");
+  const weekdays = $("[data-calendar-weekdays]");
+  grid.innerHTML = "";
 
   if (!appState.archive.length) {
-    const empty = document.createElement("article");
-    empty.className = "archive-item";
+    nav.hidden = true;
+    weekdays.hidden = true;
+    const empty = document.createElement("p");
+    empty.className = "calendar-empty-note";
     empty.textContent = "아직 그림일기가 없어요. 오늘 주제에 답하면 여기에 차곡차곡 쌓여요.";
-    list.append(empty);
+    grid.append(empty);
     return;
   }
 
-  appState.archive.forEach((item) => {
-    const row = document.createElement("article");
-    row.className = "archive-item";
-    row.innerHTML = `
-      <p class="archive-item__meta">${item.date} · ${item.revealed ? "공개됨" : "대기 중"}</p>
-      <h3>${item.prompt?.text_ko || "주제 없음"}</h3>
-      <p class="muted">나 ${statusLabel(item.my_drawing?.status)} · 상대 ${statusLabel(item.partner_drawing?.status)}</p>
-    `;
-    list.append(row);
+  nav.hidden = false;
+  weekdays.hidden = false;
+
+  const { year, month } = appState.archiveMonth;
+  $("[data-calendar-month-label]").textContent = monthLabel(year, month);
+
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  for (let index = 0; index < firstWeekday; index += 1) {
+    const filler = document.createElement("div");
+    filler.className = "calendar-cell calendar-cell--empty";
+    grid.append(filler);
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const session = appState.archiveSessionsByDate[dateKey];
+    grid.append(session ? buildCalendarEntryCell(dateKey, day, session) : buildCalendarPlainCell(day));
+  }
+}
+
+function buildCalendarPlainCell(day) {
+  const cell = document.createElement("div");
+  cell.className = "calendar-cell calendar-cell--plain";
+  cell.textContent = String(day);
+  return cell;
+}
+
+function buildCalendarEntryCell(dateKey, day, session) {
+  const cell = document.createElement("button");
+  cell.type = "button";
+  cell.className = "calendar-cell calendar-cell--entry";
+  cell.dataset.dateKey = dateKey;
+  cell.setAttribute(
+    "aria-label",
+    `${day}일, ${session.revealed ? "공개됨" : "대기 중"}. 눌러서 자세히 보기`,
+  );
+
+  const face = document.createElement("div");
+  face.className = "calendar-cell__face";
+  cell.append(face);
+
+  const tag = document.createElement("span");
+  tag.className = "calendar-cell__tag";
+  tag.textContent = String(day);
+  cell.append(tag);
+
+  const faces = [
+    () => {
+      face.innerHTML = "";
+      face.classList.add("calendar-cell__face--date");
+      const label = document.createElement("span");
+      label.textContent = String(day);
+      face.append(label);
+    },
+    () => {
+      face.classList.remove("calendar-cell__face--date");
+      face.innerHTML = "";
+      face.append(buildCalendarFaceImage("나", session.my_drawing));
+    },
+    () => {
+      face.classList.remove("calendar-cell__face--date");
+      face.innerHTML = "";
+      face.append(buildCalendarFaceImage("상대", session.partner_drawing));
+    },
+  ];
+
+  let faceIndex = 0;
+  faces[0]();
+  const timerId = window.setInterval(() => {
+    faceIndex = (faceIndex + 1) % faces.length;
+    faces[faceIndex]();
+  }, 3000);
+  appState.archiveCellTimers.push(timerId);
+
+  cell.addEventListener("click", () => toggleArchiveDetail(dateKey));
+
+  return cell;
+}
+
+function buildCalendarFaceImage(label, drawing) {
+  if (!drawing || drawing.status === "deleted") {
+    const placeholder = document.createElement("span");
+    placeholder.textContent = drawing?.status === "deleted" ? "삭제됨" : "대기 중";
+    return placeholder;
+  }
+
+  const image = document.createElement("img");
+  image.src = drawing.file_url;
+  image.alt = `${label}의 그림`;
+  return image;
+}
+
+function toggleArchiveDetail(dateKey) {
+  if (appState.archiveSelectedDate === dateKey) {
+    appState.archiveSelectedDate = null;
+    $("[data-archive-detail]").hidden = true;
+    $("[data-calendar-nav]").hidden = false;
+    $("[data-calendar-weekdays]").hidden = false;
+    $("[data-calendar-grid]").hidden = false;
+    $$(".calendar-cell--entry").forEach((cell) => cell.classList.remove("is-selected"));
+    return;
+  }
+
+  const session = appState.archiveSessionsByDate[dateKey];
+  if (!session) return;
+
+  appState.archiveSelectedDate = dateKey;
+  $$(".calendar-cell--entry").forEach((cell) => {
+    cell.classList.toggle("is-selected", cell.dataset.dateKey === dateKey);
   });
+
+  $("[data-archive-detail-date]").textContent = `${dateKey} · ${session.revealed ? "공개됨" : "대기 중"}`;
+  $("[data-archive-detail-prompt]").textContent = session.prompt?.text_ko || "주제 없음";
+
+  setDetailImage("mine", session.my_drawing);
+  setDetailImage("partner", session.partner_drawing);
+
+  $("[data-calendar-grid]").hidden = true;
+  $("[data-calendar-nav]").hidden = true;
+  $("[data-calendar-weekdays]").hidden = true;
+  $("[data-archive-detail]").hidden = false;
+}
+
+function setDetailImage(who, drawing) {
+  const imgEl = $(`[data-archive-detail-${who}]`);
+  const fallbackEl = $(`[data-archive-detail-${who}-fallback]`);
+
+  if (drawing && drawing.status !== "deleted") {
+    imgEl.src = drawing.file_url;
+    imgEl.hidden = false;
+    fallbackEl.hidden = true;
+  } else {
+    imgEl.removeAttribute("src");
+    imgEl.hidden = true;
+    fallbackEl.textContent = drawing?.status === "deleted" ? "삭제됨" : "그림이 없어요";
+    fallbackEl.hidden = false;
+  }
 }
 
 async function saveDisplayName(event) {
@@ -573,6 +765,7 @@ function wireEvents() {
   });
   $$('[data-action="back-today"]').forEach((button) => {
     button.addEventListener("click", () => {
+      clearArchiveCellTimers();
       renderToday();
       showScreen("today");
       startPolling(refreshTodaySilently);
@@ -583,12 +776,21 @@ function wireEvents() {
   $('[data-action="refresh"]').addEventListener("click", safe(loadToday));
   $('[data-action="poke"]').addEventListener("click", safe(pokePartner));
   $('[data-action="open-archive"]').addEventListener("click", safe(openArchive));
-  $('[data-action="open-draw"]').addEventListener("click", () => {
-    stopPolling();
-    appState.strokes = [];
-    $("[data-draw-prompt]").textContent = appState.today.prompt?.text_ko || "";
-    showScreen("draw");
-  });
+  $('[data-action="archive-prev-month"]').addEventListener("click", () => changeArchiveMonth(-1));
+  $('[data-action="archive-next-month"]').addEventListener("click", () => changeArchiveMonth(1));
+  $("[data-today-primary-row]").addEventListener("click", safe(async (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+
+    if (button.dataset.action === "open-draw") {
+      stopPolling();
+      appState.strokes = [];
+      $("[data-draw-prompt]").textContent = appState.today.prompt?.text_ko || "";
+      showScreen("draw");
+    } else if (button.dataset.action === "delete-drawing") {
+      await deleteDrawing();
+    }
+  }));
   $('[data-action="undo"]').addEventListener("click", () => {
     appState.strokes.pop();
     saveDraft();

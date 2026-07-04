@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const google = require("./google");
 
 const PORT = Number(process.env.PORT || 4174);
 const ROOT = __dirname;
@@ -248,6 +249,15 @@ function addEvent(state, eventType, payload = {}) {
 
 async function persistEvent(event) {
   await appendSheetMock("events", event);
+
+  if (google.isConfigured()) {
+    try {
+      await google.appendSheetRow([event.event_id, event.event_type, JSON.stringify(event.payload), event.created_at]);
+    } catch (error) {
+      // A logging failure shouldn't take down the request that triggered it.
+      console.error("Google Sheets log failed:", error.message);
+    }
+  }
 }
 
 async function persistNewEvents(state, beforeCount) {
@@ -343,18 +353,42 @@ function exposeDrawing(drawing, date) {
 }
 
 async function saveDrawingFiles(coupleId, date, userId, imageData, strokes, version) {
-  const folder = path.join(DRIVE_MOCK_DIR, "drawings", coupleId, date);
-  await fs.mkdir(folder, { recursive: true });
-
   const imageMatch = String(imageData).match(/^data:image\/png;base64,(.+)$/);
 
   if (!imageMatch) {
     throw new Error("PNG 이미지 데이터가 필요해요.");
   }
 
+  const imageBuffer = Buffer.from(imageMatch[1], "base64");
   const imageFile = `${userId}-v${version}.png`;
+
+  if (google.isConfigured()) {
+    try {
+      const driveFileId = await google.uploadDriveFile({
+        name: `${coupleId}_${date}_${imageFile}`,
+        mimeType: "image/png",
+        buffer: imageBuffer,
+      });
+
+      return {
+        drive_file_id: driveFileId,
+        drive_json_file_id: "",
+        file_url: `/api/files/drive/${driveFileId}`,
+      };
+    } catch (error) {
+      // A service account has no storage quota of its own, so uploading into
+      // someone's personal "My Drive" folder is rejected even with editor
+      // access; only a Shared Drive or user OAuth avoids this. Don't let a
+      // Drive-specific failure break the submit — fall back to local storage
+      // and keep going, since Sheets logging is independent of this.
+      console.error("Drive upload failed, falling back to local storage:", error.message);
+    }
+  }
+
+  const folder = path.join(DRIVE_MOCK_DIR, "drawings", coupleId, date);
+  await fs.mkdir(folder, { recursive: true });
   const jsonFile = `${userId}-v${version}.json`;
-  await fs.writeFile(path.join(folder, imageFile), Buffer.from(imageMatch[1], "base64"));
+  await fs.writeFile(path.join(folder, imageFile), imageBuffer);
   await fs.writeFile(path.join(folder, jsonFile), `${JSON.stringify(strokes || [], null, 2)}\n`);
 
   return {
@@ -604,6 +638,25 @@ async function handleArchive(request, response, state) {
 async function handleFile(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
   const relative = decodeURIComponent(url.pathname.replace(/^\/api\/files\//, ""));
+
+  if (relative.startsWith("drive/")) {
+    const fileId = relative.slice("drive/".length);
+
+    try {
+      const content = await google.downloadDriveFile(fileId);
+      response.writeHead(200, {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=31536000, immutable",
+      });
+      response.end(content);
+    } catch {
+      response.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Drive fetch failed");
+    }
+
+    return;
+  }
+
   const filePath = path.normalize(path.join(DRIVE_MOCK_DIR, relative));
 
   if (!filePath.startsWith(DRIVE_MOCK_DIR)) {
@@ -622,16 +675,42 @@ async function handleFile(request, response) {
   }
 }
 
-function googleStatus() {
-  return {
-    api_key_present: Boolean(process.env.GOOGLE_API_KEY),
-    access_token_present: Boolean(process.env.GOOGLE_ACCESS_TOKEN),
+async function googleStatus() {
+  const configured = google.isConfigured();
+  const status = {
+    service_account_present: Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON),
     sheets_id_present: Boolean(process.env.GOOGLE_SHEETS_ID),
     drive_folder_id_present: Boolean(process.env.GOOGLE_DRIVE_FOLDER_ID),
-    write_ready: Boolean(process.env.GOOGLE_ACCESS_TOKEN && process.env.GOOGLE_SHEETS_ID),
-    storage_mode: process.env.VERCEL ? "ephemeral-mock" : "local-mock",
-    note: "Drive/Sheets write operations require OAuth access token or service account credentials; the API key alone is not sufficient. Until those are configured, drawings and logs are written to a local mock folder instead of real Google Drive/Sheets, and on Vercel that mock folder is not guaranteed to persist between requests.",
+    configured,
+    storage_mode: configured ? "google" : process.env.VERCEL ? "ephemeral-mock" : "local-mock",
   };
+
+  if (configured) {
+    try {
+      await google.checkAuth();
+      status.auth_ok = true;
+    } catch (error) {
+      status.auth_ok = false;
+      status.auth_error = error.message;
+    }
+
+    if (status.auth_ok) {
+      try {
+        await google.checkDriveWrite();
+        status.drive_write_ok = true;
+      } catch (error) {
+        status.drive_write_ok = false;
+        status.drive_write_error = error.message;
+        status.note =
+          "Sheets logging works, but Drive uploads are rejected: a service account has no storage quota of its own, so it can't create files even with editor access to a personal 'My Drive' folder. Fix by sharing a Shared Drive folder (needs Google Workspace) or by switching to OAuth with the real account. Until then, drawings fall back to local mock storage.";
+      }
+    }
+  } else {
+    status.note =
+      "Drive/Sheets write operations require a service account (or OAuth) credential; a plain API key cannot write. Until GOOGLE_SERVICE_ACCOUNT_JSON/GOOGLE_SHEETS_ID/GOOGLE_DRIVE_FOLDER_ID are configured, drawings and logs are written to a local mock folder instead.";
+  }
+
+  return status;
 }
 
 async function routeApi(request, response, state) {
@@ -646,7 +725,7 @@ async function routeApi(request, response, state) {
   if (request.method === "POST" && url.pathname === "/api/drawings/delete") return handleDeleteDrawing(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/poke") return handlePoke(request, response, state);
   if (request.method === "GET" && url.pathname === "/api/archive") return handleArchive(request, response, state);
-  if (request.method === "GET" && url.pathname === "/api/google/status") return sendJson(response, 200, googleStatus());
+  if (request.method === "GET" && url.pathname === "/api/google/status") return sendJson(response, 200, await googleStatus());
   if (request.method === "GET" && url.pathname.startsWith("/api/files/")) return handleFile(request, response);
 
   sendError(response, 404, "API 경로를 찾지 못했어요.");

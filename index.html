@@ -158,7 +158,7 @@
         </section>
 
         <nav class="bottom-actions" aria-label="오늘 행동">
-          <button class="primary-action" type="button" data-action="open-draw">오늘 주제 그리기</button>
+          <div class="today-primary-row" data-today-primary-row></div>
           <button class="secondary-action" type="button" data-action="poke">콕 찌르기</button>
           <button class="secondary-action" type="button" data-action="open-archive">그림일기 보기</button>
         </nav>
@@ -204,7 +204,36 @@
             <h2 id="archive-title">쌓여가는 그림일기</h2>
           </div>
         </header>
-        <div class="archive-list" data-archive-list></div>
+
+        <div class="calendar-nav" data-calendar-nav hidden>
+          <button class="icon-button" type="button" data-action="archive-prev-month" aria-label="이전 달">‹</button>
+          <p class="calendar-month-label" data-calendar-month-label></p>
+          <button class="icon-button" type="button" data-action="archive-next-month" aria-label="다음 달">›</button>
+        </div>
+
+        <div class="calendar-weekdays" data-calendar-weekdays hidden aria-hidden="true">
+          <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+        </div>
+
+        <div class="calendar-grid" data-calendar-grid></div>
+
+        <section class="archive-detail" data-archive-detail hidden>
+          <p class="eyebrow" data-archive-detail-date></p>
+          <h3 data-archive-detail-prompt></h3>
+          <div class="archive-detail-pair">
+            <figure class="archive-detail-figure">
+              <figcaption>나</figcaption>
+              <img data-archive-detail-mine alt="내 그림" />
+              <span class="archive-detail-fallback" data-archive-detail-mine-fallback hidden></span>
+            </figure>
+            <figure class="archive-detail-figure">
+              <figcaption>상대</figcaption>
+              <img data-archive-detail-partner alt="상대 그림" />
+              <span class="archive-detail-fallback" data-archive-detail-partner-fallback hidden></span>
+            </figure>
+          </div>
+          <p class="muted">날짜를 다시 누르면 달력으로 돌아가요.</p>
+        </section>
       </section>
 
       <div class="toast" data-toast hidden></div>

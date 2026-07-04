@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check script.js && node --check 'api/[...path].js'"
+    "check": "node --check server.js && node --check script.js && node --check google.js && node --check 'api/[...path].js'"
   },
   "engines": {
     "node": ">=20"

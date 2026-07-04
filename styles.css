@@ -68,7 +68,7 @@ input:focus {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
-  align-items: center;
+  align-items: start;
 }
 
 .screen {
@@ -79,11 +79,10 @@ input:focus {
   overflow-x: clip;
 }
 
-/* Welcome, pairing, and the drawing canvas are full-bleed designed layouts,
-   so they keep a forced viewport-height min-height. Today/archive screens
-   are short-content lists: leaving them at auto height lets .app-shell's
-   place-items:center balance them instead of stranding a big empty gap
-   below the last button. */
+/* Every screen aligns from the top now (align-items: start above). Welcome,
+   pairing, and the drawing canvas are full-bleed designed layouts that keep
+   a forced viewport-height min-height; Today/Archive are short-content
+   lists left at auto height so they don't stretch past their own content. */
 .screen--welcome {
   min-height: calc(100dvh - 36px);
   background:
@@ -321,6 +320,40 @@ h3 {
   box-shadow: 0 5px 0 var(--line);
 }
 
+/* The invite-code entry buttons on the welcome screen looked too heavy with
+   the thick sticker-style bottom shadow; keep just the border for a cleaner
+   look there while other screens keep the bolder default. */
+.action-panel .primary-action,
+.action-panel .secondary-action {
+  box-shadow: none;
+}
+
+.action-panel .primary-action:active,
+.action-panel .secondary-action:active {
+  transform: scale(0.98);
+  box-shadow: none;
+}
+
+.today-primary-row {
+  display: flex;
+  gap: 10px;
+}
+
+.today-primary-row .primary-action {
+  flex: 2;
+}
+
+.danger-action {
+  flex: 1;
+  min-height: clamp(50px, 7dvh, 56px);
+  border: 3px solid var(--pink-deep);
+  border-radius: 17px;
+  background: var(--surface);
+  color: var(--pink-deep);
+  font-weight: 950;
+  font-size: 15px;
+}
+
 .copy-action {
   min-height: 34px;
   padding: 0 10px;
@@ -365,7 +398,7 @@ h3 {
 .setup-panel,
 .prompt-panel,
 .reveal-panel,
-.archive-item {
+.archive-detail {
   padding: 20px;
   border: 3px solid var(--line);
   border-radius: var(--radius);
@@ -722,20 +755,147 @@ h3 {
   outline: 4px solid var(--yellow);
 }
 
-.archive-list {
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.calendar-month-label {
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.calendar-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.calendar-cell--empty {
+  visibility: hidden;
+}
+
+.calendar-cell--plain {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.calendar-cell--entry {
+  border: 3px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.calendar-cell--entry.is-selected {
+  border-color: var(--pink-deep);
+  box-shadow: 0 0 0 3px rgba(240, 93, 134, 0.28);
+}
+
+.calendar-cell__face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.calendar-cell__face--date {
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.calendar-cell__face img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+.calendar-cell__tag {
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 1px 5px;
+  border-radius: 999px;
+}
+
+.calendar-empty-note {
+  grid-column: 1 / -1;
+  padding: 24px 8px;
+  text-align: center;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.archive-detail {
   display: grid;
   gap: 12px;
 }
 
-.archive-item {
-  display: grid;
+.archive-detail-pair {
+  display: flex;
   gap: 10px;
 }
 
-.archive-item__meta {
+.archive-detail-figure {
+  flex: 1;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.archive-detail-figure figcaption {
   color: var(--muted);
   font-size: 13px;
   font-weight: 800;
+}
+
+.archive-detail-figure img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border: 3px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.archive-detail-fallback {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1 / 1;
+  border: 3px dashed var(--soft-line);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
 }
 
 .toast {
