@@ -5,6 +5,43 @@ const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googlea
 let cachedCredentials = null;
 let cachedToken = null;
 let cachedSheetTitle = null;
+let ensuredSheets = new Set();
+
+const GLOBAL_SHEET_TITLE = "전체 로그";
+const GLOBAL_HEADERS = [
+  "기록시각(created_at)",
+  "이벤트ID(event_id)",
+  "이벤트종류(event_type)",
+  "사용자ID(user_id)",
+  "관계방ID(couple_id)",
+  "날짜(date)",
+  "세션ID(session_id)",
+  "그림ID(drawing_id)",
+  "채팅ID(chat_id)",
+  "닉네임(profile_name)",
+  "요청ID(request_id)",
+  "상세데이터(payload_json)",
+];
+const PAIR_HEADERS = [
+  "기록시각(created_at)",
+  "이벤트ID(event_id)",
+  "이벤트종류(event_type)",
+  "날짜(date)",
+  "사용자ID(user_id)",
+  "닉네임(profile_name)",
+  "상대사용자ID(partner_user_id)",
+  "세션ID(session_id)",
+  "질문ID(prompt_id)",
+  "질문내용(prompt_text)",
+  "그림ID(drawing_id)",
+  "그림상태(drawing_status)",
+  "드라이브파일ID(drive_file_id)",
+  "파일URL(file_url)",
+  "채팅ID(chat_id)",
+  "채팅내용(chat_text)",
+  "이모티콘(emoji)",
+  "상세데이터(payload_json)",
+];
 
 function loadCredentials() {
   if (cachedCredentials !== null) return cachedCredentials;
@@ -27,6 +64,50 @@ function loadCredentials() {
 
 function isConfigured() {
   return Boolean(loadCredentials() && process.env.GOOGLE_SHEETS_ID && process.env.GOOGLE_DRIVE_FOLDER_ID);
+}
+
+function sanitizeSheetTitle(title) {
+  return String(title || "sheet")
+    .replace(/[\[\]\*\?\/\\:]/g, "_")
+    .slice(0, 96);
+}
+
+function quoteSheetTitle(title) {
+  const safeTitle = sanitizeSheetTitle(title);
+  return `'${safeTitle.replace(/'/g, "''")}'`;
+}
+
+function sheetRange(title, range) {
+  return `${quoteSheetTitle(title)}!${range}`;
+}
+
+function columnName(count) {
+  let name = "";
+  let n = count;
+
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    n = Math.floor((n - 1) / 26);
+  }
+
+  return name || "A";
+}
+
+function pairSheetTitle(coupleId) {
+  const compactId = String(coupleId || "unknown")
+    .replace(/^couple_/, "")
+    .replace(/[^a-zA-Z0-9가-힣_-]/g, "")
+    .slice(0, 18);
+  return sanitizeSheetTitle(`방_${compactId || "unknown"}`);
+}
+
+function jsonCell(value) {
+  try {
+    return JSON.stringify(value || {});
+  } catch {
+    return "{}";
+  }
 }
 
 function base64url(input) {
@@ -198,9 +279,14 @@ async function getSheetTitle(token) {
 }
 
 async function getSheetTitles(token) {
+  const sheets = await getSpreadsheetSheets(token);
+  return sheets.map((sheet) => sheet.title).filter(Boolean);
+}
+
+async function getSpreadsheetSheets(token) {
   const sheetsId = process.env.GOOGLE_SHEETS_ID;
   const response = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}?fields=sheets.properties.title`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}?fields=sheets.properties(sheetId,title)`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   const payload = await response.json();
@@ -210,8 +296,80 @@ async function getSheetTitles(token) {
   }
 
   return (payload.sheets || [])
-    .map((sheet) => sheet.properties?.title)
-    .filter(Boolean);
+    .map((sheet) => sheet.properties)
+    .filter((properties) => properties?.title);
+}
+
+async function ensureSheet(title, headers) {
+  const token = await getAccessToken();
+  const sheetsId = process.env.GOOGLE_SHEETS_ID;
+  const safeTitle = sanitizeSheetTitle(title);
+  const cacheKey = `${safeTitle}:${headers.join("|")}`;
+
+  if (ensuredSheets.has(cacheKey)) {
+    return safeTitle;
+  }
+
+  const sheets = await getSpreadsheetSheets(token);
+  const exists = sheets.some((sheet) => sheet.title === safeTitle);
+
+  if (!exists) {
+    const addResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}:batchUpdate`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: safeTitle,
+                gridProperties: {
+                  frozenRowCount: 1,
+                },
+              },
+            },
+          },
+        ],
+      }),
+    });
+    const addPayload = await addResponse.json().catch(() => ({}));
+
+    if (!addResponse.ok) {
+      throw new Error(`Sheet create failed: ${addPayload.error?.message || addResponse.status}`);
+    }
+  }
+
+  const headerRange = encodeURIComponent(sheetRange(safeTitle, `A1:${columnName(headers.length)}1`));
+  const readResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/${headerRange}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const readPayload = await readResponse.json().catch(() => ({}));
+
+  if (!readResponse.ok) {
+    throw new Error(`Sheet header read failed: ${readPayload.error?.message || readResponse.status}`);
+  }
+
+  const currentHeaders = readPayload.values?.[0] || [];
+  const shouldWriteHeaders = headers.some((header, index) => currentHeaders[index] !== header);
+
+  if (shouldWriteHeaders) {
+    const writeResponse = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/${headerRange}?valueInputOption=RAW`,
+      {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ values: [headers] }),
+      },
+    );
+    const writePayload = await writeResponse.json().catch(() => ({}));
+
+    if (!writeResponse.ok) {
+      throw new Error(`Sheet header write failed: ${writePayload.error?.message || writeResponse.status}`);
+    }
+  }
+
+  ensuredSheets.add(cacheKey);
+  return safeTitle;
 }
 
 async function appendSheetRow(values) {
@@ -235,6 +393,119 @@ async function appendSheetRow(values) {
   }
 
   return payload;
+}
+
+async function appendSheetRowToSheet(title, values, headers) {
+  const token = await getAccessToken();
+  const sheetsId = process.env.GOOGLE_SHEETS_ID;
+  const safeTitle = await ensureSheet(title, headers);
+  const range = encodeURIComponent(sheetRange(safeTitle, "A1"));
+
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/${range}:append?valueInputOption=RAW`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [values] }),
+    },
+  );
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`Sheets append failed: ${payload.error?.message || response.status}`);
+  }
+
+  return payload;
+}
+
+function globalEventRow(event) {
+  const payload = event.payload || {};
+
+  return [
+    event.created_at || "",
+    event.event_id || "",
+    event.event_type || "",
+    payload.user_id || "",
+    payload.couple_id || "",
+    payload.date || "",
+    payload.session_id || "",
+    payload.drawing_id || "",
+    payload.chat_id || "",
+    payload.profile_name || payload.display_name || "",
+    payload.request_id || "",
+    jsonCell(payload),
+  ];
+}
+
+function pairEventRow(event) {
+  const payload = event.payload || {};
+
+  return [
+    event.created_at || "",
+    event.event_id || "",
+    event.event_type || "",
+    payload.date || "",
+    payload.user_id || "",
+    payload.profile_name || payload.display_name || "",
+    payload.partner_user_id || "",
+    payload.session_id || "",
+    payload.prompt_id || "",
+    payload.prompt_text || "",
+    payload.drawing_id || "",
+    payload.drawing_status || payload.status || "",
+    payload.drive_file_id || "",
+    payload.file_url || "",
+    payload.chat_id || "",
+    payload.chat_text || "",
+    payload.emoji || "",
+    jsonCell(payload),
+  ];
+}
+
+async function ensurePairSheet(coupleId) {
+  return ensureSheet(pairSheetTitle(coupleId), PAIR_HEADERS);
+}
+
+async function appendDatabaseEvent(event) {
+  await appendSheetRowToSheet(GLOBAL_SHEET_TITLE, globalEventRow(event), GLOBAL_HEADERS);
+
+  if (event.payload?.couple_id) {
+    await appendSheetRowToSheet(pairSheetTitle(event.payload.couple_id), pairEventRow(event), PAIR_HEADERS);
+  }
+}
+
+async function readDatabaseEvents() {
+  const token = await getAccessToken();
+  const sheetsId = process.env.GOOGLE_SHEETS_ID;
+  await ensureSheet(GLOBAL_SHEET_TITLE, GLOBAL_HEADERS);
+  const range = encodeURIComponent(sheetRange(GLOBAL_SHEET_TITLE, `A2:${columnName(GLOBAL_HEADERS.length)}`));
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/${range}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(`Sheet read failed: ${payload.error?.message || response.status}`);
+  }
+
+  return (payload.values || [])
+    .map((row) => {
+      let eventPayload = {};
+
+      try {
+        eventPayload = JSON.parse(row[11] || "{}");
+      } catch {
+        eventPayload = {};
+      }
+
+      return {
+        created_at: row[0] || "",
+        event_id: row[1] || "",
+        event_type: row[2] || "",
+        payload: eventPayload,
+      };
+    })
+    .filter((event) => event.event_id && event.event_type);
 }
 
 async function uploadDriveFile({ name, mimeType, buffer }) {
@@ -336,6 +607,7 @@ async function clearSheets() {
   }
 
   cachedSheetTitle = null;
+  ensuredSheets = new Set();
   return { sheetsCleared };
 }
 
@@ -384,6 +656,9 @@ module.exports = {
   checkAuth,
   checkDriveWrite,
   appendSheetRow,
+  appendDatabaseEvent,
+  readDatabaseEvents,
+  ensurePairSheet,
   uploadDriveFile,
   downloadDriveFile,
   deleteDriveFile,

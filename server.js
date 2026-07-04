@@ -23,6 +23,7 @@ const DEFAULT_STATE = {
   invites: [],
   sessions: [],
   drawings: [],
+  chats: [],
   events: [],
   errors: [],
 };
@@ -100,8 +101,24 @@ async function readState() {
     return { ...DEFAULT_STATE, ...JSON.parse(raw) };
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    await writeState(DEFAULT_STATE);
-    return structuredClone(DEFAULT_STATE);
+
+    if (google.isConfigured()) {
+      try {
+        const events = await google.readDatabaseEvents();
+
+        if (events.length) {
+          const restoredState = buildStateFromEvents(events);
+          await writeState(restoredState);
+          return restoredState;
+        }
+      } catch (restoreError) {
+        console.error("Google Sheets state restore failed:", restoreError.message);
+      }
+    }
+
+    const initialState = structuredClone(DEFAULT_STATE);
+    await writeState(initialState);
+    return initialState;
   }
 }
 
@@ -115,18 +132,169 @@ async function appendSheetMock(tab, row) {
   await fs.appendFile(path.join(SHEETS_MOCK_DIR, `${tab}.jsonl`), `${JSON.stringify(row)}\n`);
 }
 
+function upsertById(items, key, value, patch) {
+  let item = items.find((candidate) => candidate[key] === value);
+
+  if (!item) {
+    item = { [key]: value };
+    items.push(item);
+  }
+
+  Object.assign(item, patch);
+  return item;
+}
+
+function buildStateFromEvents(events) {
+  const state = structuredClone(DEFAULT_STATE);
+
+  events.forEach((event) => {
+    state.events.push(event);
+    const payload = event.payload || {};
+
+    if (event.event_type === "user_created" && payload.user_id && payload.device_id) {
+      upsertById(state.users, "user_id", payload.user_id, {
+        user_id: payload.user_id,
+        device_id: payload.device_id,
+        display_name: payload.display_name || "끄적러",
+        created_at: event.created_at,
+        last_seen_at: event.created_at,
+      });
+      return;
+    }
+
+    if (event.event_type === "profile_updated" && payload.user_id) {
+      upsertById(state.users, "user_id", payload.user_id, {
+        user_id: payload.user_id,
+        device_id: payload.device_id || "",
+        display_name: payload.display_name || "끄적러",
+        last_seen_at: event.created_at,
+      });
+      return;
+    }
+
+    if (event.event_type === "invite_created" && payload.couple_id && payload.invite_id) {
+      upsertById(state.couples, "couple_id", payload.couple_id, {
+        couple_id: payload.couple_id,
+        user_a_id: payload.user_id || "",
+        user_b_id: "",
+        created_at: event.created_at,
+        created_date: payload.created_date || todayKst(),
+        status: "pending",
+      });
+      upsertById(state.invites, "invite_id", payload.invite_id, {
+        invite_id: payload.invite_id,
+        couple_id: payload.couple_id,
+        code: payload.code || "",
+        created_by: payload.user_id || "",
+        created_at: event.created_at,
+        status: "open",
+      });
+      return;
+    }
+
+    if (event.event_type === "invite_accepted" && payload.couple_id && payload.invite_id) {
+      const couple = upsertById(state.couples, "couple_id", payload.couple_id, {
+        couple_id: payload.couple_id,
+        user_a_id: payload.user_a_id || "",
+        user_b_id: payload.user_id || "",
+        status: "active",
+        activated_at: event.created_at,
+      });
+      if (!couple.created_at) couple.created_at = event.created_at;
+      if (!couple.created_date) couple.created_date = payload.created_date || todayKst();
+      upsertById(state.invites, "invite_id", payload.invite_id, {
+        invite_id: payload.invite_id,
+        couple_id: payload.couple_id,
+        code: payload.code || "",
+        created_by: payload.user_a_id || "",
+        accepted_by: payload.user_id || "",
+        accepted_at: event.created_at,
+        status: "accepted",
+      });
+      return;
+    }
+
+    if (event.event_type === "daily_session_created" && payload.session_id) {
+      upsertById(state.sessions, "session_id", payload.session_id, {
+        session_id: payload.session_id,
+        couple_id: payload.couple_id || "",
+        date: payload.date || "",
+        day_index: Number(payload.day_index || 0),
+        prompt_id: payload.prompt_id || "",
+        revealed_at: "",
+        created_at: event.created_at,
+        updated_at: event.created_at,
+      });
+      return;
+    }
+
+    if (event.event_type === "drawing_revealed" && payload.session_id) {
+      const session = state.sessions.find((item) => item.session_id === payload.session_id);
+      if (session) {
+        session.revealed_at = event.created_at;
+        session.updated_at = event.created_at;
+      }
+      return;
+    }
+
+    if (["drawing_submitted", "drawing_modified", "drawing_deleted"].includes(event.event_type) && payload.drawing) {
+      upsertById(state.drawings, "drawing_id", payload.drawing.drawing_id, payload.drawing);
+      return;
+    }
+
+    if (["chat_created", "chat_updated"].includes(event.event_type) && payload.chat) {
+      upsertById(state.chats, "chat_id", payload.chat.chat_id, payload.chat);
+    }
+  });
+
+  return state;
+}
+
 async function readPrompts() {
   const raw = await fs.readFile(path.join(ROOT, "docs", "prompts-100.md"), "utf8");
   return raw
     .split("\n")
     .map((line) => line.match(/^(\d+)\.\s+(.+)$/))
     .filter(Boolean)
-    .map((match) => ({
-      prompt_id: `prompt_${String(match[1]).padStart(3, "0")}`,
-      day_index: Number(match[1]),
-      text_ko: match[2],
-      status: "draft",
-    }));
+    .map((match) => {
+      const variants = {};
+
+      match[2].split("||").forEach((part) => {
+        const variantMatch = part.trim().match(/^\[(common|friend|lover|close)\]\s+(.+)$/);
+        if (variantMatch) {
+          variants[variantMatch[1]] = variantMatch[2].trim();
+        }
+      });
+
+      if (!Object.keys(variants).length) {
+        variants.common = match[2].trim();
+      }
+
+      return {
+        prompt_id: `prompt_${String(match[1]).padStart(3, "0")}`,
+        day_index: Number(match[1]),
+        variants,
+        category: "common",
+        text_ko: variants.common || variants.close || Object.values(variants)[0],
+        status: "draft",
+      };
+    });
+}
+
+function relationshipTypeFromRequest(request) {
+  const relationshipType = String(request.headers["x-relationship-type"] || "close");
+  return ["close", "friend", "lover"].includes(relationshipType) ? relationshipType : "close";
+}
+
+function promptsForRelationship(prompts, relationshipType) {
+  return prompts.map((prompt) => ({
+    ...prompt,
+    text_ko:
+      prompt.variants?.[relationshipType] ||
+      prompt.variants?.close ||
+      prompt.variants?.common ||
+      prompt.text_ko,
+  }));
 }
 
 function sendJson(response, statusCode, body) {
@@ -212,24 +380,40 @@ function getDeviceId(request) {
   return deviceId;
 }
 
+function normalizeDisplayName(displayName) {
+  return String(displayName || "").trim().slice(0, 16);
+}
+
 function ensureUser(state, deviceId, displayName = "") {
   let user = state.users.find((item) => item.device_id === deviceId);
+  const normalizedDisplayName = normalizeDisplayName(displayName);
 
   if (!user) {
     user = {
       user_id: id("user"),
       device_id: deviceId,
-      display_name: displayName || "끄적러",
+      display_name: normalizedDisplayName || "끄적러",
       created_at: nowIso(),
       last_seen_at: nowIso(),
     };
     state.users.push(user);
-    addEvent(state, "user_created", { user_id: user.user_id });
+    addEvent(state, "user_created", {
+      user_id: user.user_id,
+      device_id: user.device_id,
+      display_name: user.display_name,
+      profile_name: user.display_name,
+    });
   } else {
     user.last_seen_at = nowIso();
 
-    if (displayName) {
-      user.display_name = String(displayName).slice(0, 16);
+    if (normalizedDisplayName && user.display_name !== normalizedDisplayName) {
+      user.display_name = normalizedDisplayName;
+      addEvent(state, "profile_updated", {
+        user_id: user.user_id,
+        device_id: user.device_id,
+        display_name: user.display_name,
+        profile_name: user.display_name,
+      });
     }
   }
 
@@ -252,7 +436,7 @@ async function persistEvent(event) {
 
   if (google.isConfigured()) {
     try {
-      await google.appendSheetRow([event.event_id, event.event_type, JSON.stringify(event.payload), event.created_at]);
+      await google.appendDatabaseEvent(event);
     } catch (error) {
       // A logging failure shouldn't take down the request that triggered it.
       console.error("Google Sheets log failed:", error.message);
@@ -274,18 +458,23 @@ function coupleForUser(state, userId) {
   );
 }
 
-async function getTodayContext(state, user) {
+async function getTodayContext(state, user, relationshipType = "close") {
   const date = todayKst();
   const couple = coupleForUser(state, user.user_id);
   const prompts = await readPrompts();
+  const promptPool = promptsForRelationship(prompts, relationshipType);
 
   if (!couple) {
     return { user, couple: null, date, prompt: null };
   }
 
-  const dayIndex = Math.min(dateDiffDays(couple.created_date, date) + 1, prompts.length);
-  const prompt = prompts[dayIndex - 1] || null;
+  const dayIndex = Math.min(dateDiffDays(couple.created_date, date) + 1, promptPool.length);
+  let prompt = promptPool[dayIndex - 1] || null;
   let session = state.sessions.find((item) => item.couple_id === couple.couple_id && item.date === date);
+
+  if (session) {
+    prompt = prompts.find((item) => item.prompt_id === session.prompt_id) || prompt;
+  }
 
   if (!session) {
     session = {
@@ -303,7 +492,9 @@ async function getTodayContext(state, user) {
       couple_id: couple.couple_id,
       session_id: session.session_id,
       date,
+      day_index: session.day_index,
       prompt_id: session.prompt_id,
+      prompt_text: prompt?.text_ko || "",
     });
   }
 
@@ -318,6 +509,7 @@ async function getTodayContext(state, user) {
     addEvent(state, "drawing_revealed", {
       couple_id: couple.couple_id,
       session_id: session.session_id,
+      date,
     });
   }
 
@@ -349,6 +541,85 @@ function exposeDrawing(drawing, date) {
     modify_count: drawing.modify_count,
     deleted_at: drawing.deleted_at,
     can_modify: drawing.status !== "deleted" && drawing.date === date && drawing.modify_count < 1,
+  };
+}
+
+function drawingSnapshot(drawing) {
+  return {
+    drawing_id: drawing.drawing_id,
+    session_id: drawing.session_id,
+    couple_id: drawing.couple_id,
+    user_id: drawing.user_id,
+    date: drawing.date,
+    prompt_id: drawing.prompt_id,
+    submitted_at: drawing.submitted_at,
+    modified_at: drawing.modified_at,
+    modify_count: drawing.modify_count,
+    deleted_at: drawing.deleted_at,
+    status: drawing.status,
+    request_id: drawing.request_id,
+    drive_file_id: drawing.drive_file_id,
+    drive_json_file_id: drawing.drive_json_file_id,
+    file_url: drawing.file_url,
+  };
+}
+
+function drawingEventPayload(drawing, context, user) {
+  return {
+    user_id: user.user_id,
+    profile_name: user.display_name,
+    couple_id: context.couple.couple_id,
+    session_id: context.session.session_id,
+    date: context.date,
+    prompt_id: context.prompt.prompt_id,
+    prompt_text: context.prompt.text_ko,
+    drawing_id: drawing.drawing_id,
+    drawing_status: drawing.status,
+    drive_file_id: drawing.drive_file_id,
+    file_url: drawing.file_url,
+    request_id: drawing.request_id || "",
+    drawing: drawingSnapshot(drawing),
+  };
+}
+
+function exposeChat(chat, user) {
+  return {
+    chat_id: chat.chat_id,
+    date: chat.date,
+    user_id: chat.user_id,
+    profile_name: chat.profile_name,
+    text: chat.text,
+    emoji: chat.emoji,
+    created_at: chat.created_at,
+    updated_at: chat.updated_at,
+    can_edit: chat.user_id === user.user_id,
+  };
+}
+
+function chatSnapshot(chat) {
+  return {
+    chat_id: chat.chat_id,
+    couple_id: chat.couple_id,
+    date: chat.date,
+    user_id: chat.user_id,
+    profile_name: chat.profile_name,
+    text: chat.text,
+    emoji: chat.emoji,
+    created_at: chat.created_at,
+    updated_at: chat.updated_at,
+  };
+}
+
+function chatEventPayload(chat) {
+  return {
+    user_id: chat.user_id,
+    profile_name: chat.profile_name,
+    couple_id: chat.couple_id,
+    date: chat.date,
+    chat_id: chat.chat_id,
+    chat_text: chat.text,
+    emoji: chat.emoji,
+    chat: chatSnapshot(chat),
   };
 }
 
@@ -413,7 +684,8 @@ function openInviteForCouple(state, coupleId) {
 }
 
 async function handleCreateInvite(request, response, state) {
-  const user = ensureUser(state, getDeviceId(request));
+  const body = await readBody(request);
+  const user = ensureUser(state, getDeviceId(request), body.display_name);
 
   if (coupleForUser(state, user.user_id)) {
     throw new Error("이미 연결된 상대가 있어요.");
@@ -454,13 +726,20 @@ async function handleCreateInvite(request, response, state) {
   };
   state.couples.push(couple);
   state.invites.push(invite);
-  addEvent(state, "invite_created", { user_id: user.user_id, couple_id: couple.couple_id });
+  addEvent(state, "invite_created", {
+    user_id: user.user_id,
+    profile_name: user.display_name,
+    couple_id: couple.couple_id,
+    invite_id: invite.invite_id,
+    code: invite.code,
+    created_date: couple.created_date,
+  });
   sendJson(response, 200, { invite: { code }, couple });
 }
 
 async function handleAcceptInvite(request, response, state) {
   const body = await readBody(request);
-  const user = ensureUser(state, getDeviceId(request));
+  const user = ensureUser(state, getDeviceId(request), body.display_name);
 
   if (coupleForUser(state, user.user_id)) {
     throw new Error("이미 연결된 상대가 있어요.");
@@ -487,7 +766,13 @@ async function handleAcceptInvite(request, response, state) {
   couple.activated_at = nowIso();
   addEvent(state, "invite_accepted", {
     user_id: user.user_id,
+    profile_name: user.display_name,
     couple_id: couple.couple_id,
+    invite_id: invite.invite_id,
+    code: invite.code,
+    user_a_id: couple.user_a_id,
+    partner_user_id: couple.user_a_id,
+    created_date: couple.created_date,
   });
   sendJson(response, 200, { couple });
 }
@@ -507,14 +792,14 @@ async function handleMyInvite(request, response, state) {
 
 async function handleToday(request, response, state) {
   const user = ensureUser(state, getDeviceId(request));
-  const context = await getTodayContext(state, user);
+  const context = await getTodayContext(state, user, relationshipTypeFromRequest(request));
   sendJson(response, 200, context);
 }
 
 async function handleSubmitDrawing(request, response, state) {
   const body = await readBody(request);
   const user = ensureUser(state, getDeviceId(request));
-  const context = await getTodayContext(state, user);
+  const context = await getTodayContext(state, user, relationshipTypeFromRequest(request));
   const requestId = String(body.request_id || "");
 
   if (!context.couple || !context.session || !context.prompt) {
@@ -564,7 +849,7 @@ async function handleSubmitDrawing(request, response, state) {
       ...files,
     };
     state.drawings.push(drawing);
-    addEvent(state, "drawing_submitted", { drawing_id: drawing.drawing_id });
+    addEvent(state, "drawing_submitted", drawingEventPayload(drawing, context, user));
   } else {
     Object.assign(drawing, files, {
       modified_at: nowIso(),
@@ -572,7 +857,7 @@ async function handleSubmitDrawing(request, response, state) {
       status: "modified",
       request_id: requestId,
     });
-    addEvent(state, "drawing_modified", { drawing_id: drawing.drawing_id });
+    addEvent(state, "drawing_modified", drawingEventPayload(drawing, context, user));
   }
 
   context.session.updated_at = nowIso();
@@ -582,7 +867,7 @@ async function handleSubmitDrawing(request, response, state) {
 
 async function handleDeleteDrawing(request, response, state) {
   const user = ensureUser(state, getDeviceId(request));
-  const context = await getTodayContext(state, user);
+  const context = await getTodayContext(state, user, relationshipTypeFromRequest(request));
   const drawing = context.session ? drawingFor(state, context.session.session_id, user.user_id) : null;
 
   if (!drawing || drawing.status === "deleted") {
@@ -591,7 +876,7 @@ async function handleDeleteDrawing(request, response, state) {
 
   drawing.status = "deleted";
   drawing.deleted_at = nowIso();
-  addEvent(state, "drawing_deleted", { drawing_id: drawing.drawing_id });
+  addEvent(state, "drawing_deleted", drawingEventPayload(drawing, context, user));
   sendJson(response, 200, { drawing: exposeDrawing(drawing, context.date) });
 }
 
@@ -603,8 +888,92 @@ async function handlePoke(request, response, state) {
     throw new Error("상대와 먼저 연결해주세요.");
   }
 
-  addEvent(state, "poke_sent", { user_id: user.user_id, couple_id: couple.couple_id });
+  addEvent(state, "poke_sent", {
+    user_id: user.user_id,
+    profile_name: user.display_name,
+    couple_id: couple.couple_id,
+  });
   sendJson(response, 200, { ok: true });
+}
+
+function dateFromQueryOrToday(request) {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  const date = String(url.searchParams.get("date") || todayKst()).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : todayKst();
+}
+
+async function handleGetChats(request, response, state) {
+  const user = ensureUser(state, getDeviceId(request));
+  const couple = coupleForUser(state, user.user_id);
+
+  if (!couple) {
+    sendJson(response, 200, { chats: [] });
+    return;
+  }
+
+  const date = dateFromQueryOrToday(request);
+  const chats = state.chats
+    .filter((chat) => chat.couple_id === couple.couple_id && chat.date === date)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map((chat) => exposeChat(chat, user));
+  sendJson(response, 200, { chats });
+}
+
+async function handleCreateChat(request, response, state) {
+  const body = await readBody(request);
+  const user = ensureUser(state, getDeviceId(request));
+  const couple = coupleForUser(state, user.user_id);
+
+  if (!couple) {
+    throw new Error("둘만의 방을 먼저 연결해 주세요.");
+  }
+
+  const text = String(body.text || "").trim().slice(0, 140);
+  const emoji = String(body.emoji || "").trim().slice(0, 4);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(body.date || "")) ? String(body.date) : todayKst();
+
+  if (!text && !emoji) {
+    throw new Error("댓글이나 이모티콘을 남겨주세요.");
+  }
+
+  const chat = {
+    chat_id: id("chat"),
+    couple_id: couple.couple_id,
+    date,
+    user_id: user.user_id,
+    profile_name: user.display_name,
+    text,
+    emoji,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  state.chats.push(chat);
+  addEvent(state, "chat_created", chatEventPayload(chat));
+  sendJson(response, 200, { chat: exposeChat(chat, user) });
+}
+
+async function handleUpdateChat(request, response, state) {
+  const body = await readBody(request);
+  const user = ensureUser(state, getDeviceId(request));
+  const chat = state.chats.find((item) => item.chat_id === body.chat_id);
+
+  if (!chat || chat.user_id !== user.user_id) {
+    throw new Error("내가 남긴 댓글만 수정할 수 있어요.");
+  }
+
+  const text = String(body.text || "").trim().slice(0, 140);
+  const emoji = String(body.emoji || chat.emoji || "").trim().slice(0, 4);
+
+  if (!text && !emoji) {
+    throw new Error("댓글이나 이모티콘을 남겨주세요.");
+  }
+
+  chat.text = text;
+  chat.emoji = emoji;
+  chat.profile_name = user.display_name;
+  chat.updated_at = nowIso();
+  addEvent(state, "chat_updated", chatEventPayload(chat));
+  sendJson(response, 200, { chat: exposeChat(chat, user) });
 }
 
 async function handleArchive(request, response, state) {
@@ -631,7 +1000,11 @@ async function handleArchive(request, response, state) {
       };
     });
 
-  addEvent(state, "archive_opened", { user_id: user.user_id, couple_id: couple.couple_id });
+  addEvent(state, "archive_opened", {
+    user_id: user.user_id,
+    profile_name: user.display_name,
+    couple_id: couple.couple_id,
+  });
   sendJson(response, 200, { sessions });
 }
 
@@ -697,6 +1070,14 @@ async function googleStatus() {
     }
 
     if (status.auth_ok) {
+      try {
+        await google.readDatabaseEvents();
+        status.sheets_database_ok = true;
+      } catch (error) {
+        status.sheets_database_ok = false;
+        status.sheets_database_error = error.message;
+      }
+
       try {
         await google.checkDriveWrite();
         status.drive_write_ok = true;
@@ -786,6 +1167,9 @@ async function routeApi(request, response, state) {
   if (request.method === "POST" && url.pathname === "/api/drawings/submit") return handleSubmitDrawing(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/drawings/delete") return handleDeleteDrawing(request, response, state);
   if (request.method === "POST" && url.pathname === "/api/poke") return handlePoke(request, response, state);
+  if (request.method === "GET" && url.pathname === "/api/chats") return handleGetChats(request, response, state);
+  if (request.method === "POST" && url.pathname === "/api/chats") return handleCreateChat(request, response, state);
+  if (request.method === "POST" && url.pathname === "/api/chats/update") return handleUpdateChat(request, response, state);
   if (request.method === "GET" && url.pathname === "/api/archive") return handleArchive(request, response, state);
   if (request.method === "GET" && url.pathname === "/api/google/status") return sendJson(response, 200, await googleStatus());
   if (request.method === "GET" && url.pathname.startsWith("/api/files/")) return handleFile(request, response);

@@ -14,7 +14,7 @@
 ## Brand and Copy References
 - Referenced copy:
   - `서로를 떠올리는 가장 귀여운 방법`
-  - `커플끼리 매일 낙서 하나씩 주고받는 앱이에요`
+  - `가까운 두 사람이 매일 낙서 하나씩 주고받는 앱이에요`
   - `오늘의 주제는... '요즘 내 기분'`
   - `둘 다 그리면 짠! 동시에 공개.`
 - Referenced fonts from official website note:

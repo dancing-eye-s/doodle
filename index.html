@@ -68,7 +68,32 @@
           </p>
         </section>
 
+        <section class="profile-panel" aria-label="프로필 선택">
+          <div class="profile-panel__head">
+            <div>
+              <p class="eyebrow">프로필</p>
+              <h2>누구로 들어갈까요?</h2>
+            </div>
+            <button class="mini-action" type="button" data-action="add-profile">추가</button>
+          </div>
+          <div class="profile-list" data-profile-list></div>
+          <form class="profile-form" data-form="name">
+            <label class="field">
+              <span>닉네임</span>
+              <input
+                name="display_name"
+                data-profile-name
+                maxlength="16"
+                autocomplete="nickname"
+                placeholder="나를 어떻게 부를까요?"
+              />
+            </label>
+            <button class="secondary-action secondary-action--compact" type="submit">닉네임 저장</button>
+          </form>
+        </section>
+
         <nav class="action-panel" aria-label="시작하기">
+          <button class="primary-action" type="button" data-action="enter-today" hidden>오늘 방 열기</button>
           <button class="primary-action" type="button" data-action="open-join">초대 코드 입력</button>
           <button class="secondary-action" type="button" data-action="open-create">초대 코드 만들기</button>
         </nav>
@@ -87,8 +112,8 @@
         <img class="pairing-logo" src="./assets/doodle-logo.svg" alt="doodle" />
 
         <section class="pairing-copy">
-          <h2 id="pairing-title">연인과 연결하기</h2>
-          <p data-pairing-helper>코드를 만들거나 받은 코드를 입력해 둘만의 방을 만들어요.</p>
+          <h2 id="pairing-title">둘만의 방 연결하기</h2>
+          <p data-pairing-helper>코드를 만들거나 받은 코드를 입력해 둘만의 낙서방을 만들어요.</p>
         </section>
 
         <div class="stack pairing-stack">
@@ -157,10 +182,32 @@
           <div class="drawing-pair" data-drawing-pair></div>
         </section>
 
+        <section class="chat-panel" aria-label="오늘 댓글">
+          <div class="chat-panel__head">
+            <div>
+              <p class="eyebrow">오늘 댓글</p>
+              <h3>그림 아래에 남기는 말</h3>
+            </div>
+          </div>
+          <div class="chat-list" data-chat-list></div>
+          <form class="chat-form" data-form="chat">
+            <input name="chat_text" maxlength="140" placeholder="짧게 남겨보세요." />
+            <div class="emoji-row" aria-label="이모티콘 선택">
+              <button type="button" data-chat-emoji="🙂">🙂</button>
+              <button type="button" data-chat-emoji="🥹">🥹</button>
+              <button type="button" data-chat-emoji="😆">😆</button>
+              <button type="button" data-chat-emoji="♥">♥</button>
+              <button type="button" data-chat-emoji="★">★</button>
+            </div>
+            <button class="secondary-action secondary-action--compact" type="submit">댓글 남기기</button>
+          </form>
+        </section>
+
         <nav class="bottom-actions" aria-label="오늘 행동">
           <div class="today-primary-row" data-today-primary-row></div>
           <button class="secondary-action" type="button" data-action="poke">콕 찌르기</button>
           <button class="secondary-action" type="button" data-action="open-archive">그림일기 보기</button>
+          <button class="secondary-action" type="button" data-action="open-settings">설정</button>
         </nav>
       </section>
 
@@ -179,12 +226,28 @@
         <canvas class="drawing-canvas" data-canvas width="900" height="900" aria-label="그림 캔버스"></canvas>
 
         <div class="tool-row" aria-label="그림 도구">
-          <button class="swatch is-selected" type="button" data-color="#30262a" aria-label="검정"></button>
-          <button class="swatch swatch--pink" type="button" data-color="#f05d86" aria-label="분홍"></button>
-          <button class="swatch swatch--yellow" type="button" data-color="#f4b942" aria-label="노랑"></button>
-          <button class="swatch swatch--mint" type="button" data-color="#55b989" aria-label="초록"></button>
+          <button class="tool-button is-selected" type="button" data-tool="pen">펜</button>
+          <button class="tool-button" type="button" data-tool="marker">마커</button>
+          <button class="tool-button" type="button" data-tool="eraser">지우개</button>
+          <button class="swatch is-selected" style="--swatch: #30262a" type="button" data-color="#30262a" aria-label="검정"></button>
+          <button class="swatch" style="--swatch: #f05d86" type="button" data-color="#f05d86" aria-label="분홍"></button>
+          <button class="swatch" style="--swatch: #f28c38" type="button" data-color="#f28c38" aria-label="주황"></button>
+          <button class="swatch" style="--swatch: #f4b942" type="button" data-color="#f4b942" aria-label="노랑"></button>
+          <button class="swatch" style="--swatch: #55b989" type="button" data-color="#55b989" aria-label="초록"></button>
+          <button class="swatch" style="--swatch: #4b8fe2" type="button" data-color="#4b8fe2" aria-label="파랑"></button>
+          <button class="swatch" style="--swatch: #8f66d9" type="button" data-color="#8f66d9" aria-label="보라"></button>
           <button class="tool-button" type="button" data-action="undo">되돌리기</button>
           <button class="tool-button" type="button" data-action="clear-canvas">지우기</button>
+        </div>
+        <div class="tool-options" aria-label="펜 세부 설정">
+          <label>
+            <span>굵기</span>
+            <input type="range" min="3" max="38" value="10" data-tool-width />
+          </label>
+          <label>
+            <span>진하기</span>
+            <input type="range" min="25" max="100" value="100" data-tool-opacity />
+          </label>
         </div>
 
         <p class="policy-copy">
@@ -233,6 +296,45 @@
             </figure>
           </div>
           <p class="muted">날짜를 다시 누르면 달력으로 돌아가요.</p>
+        </section>
+      </section>
+
+      <section class="screen" data-screen="settings" aria-labelledby="settings-title">
+        <header class="app-topbar">
+          <button class="icon-button" type="button" data-action="back-today" aria-label="오늘 화면으로">
+            ←
+          </button>
+          <div>
+            <p class="eyebrow">설정</p>
+            <h2 id="settings-title">방 설정</h2>
+          </div>
+        </header>
+
+        <section class="settings-panel">
+          <label class="field">
+            <span>관계 유형</span>
+            <select data-setting="relationship_type">
+              <option value="close">가까운 사람</option>
+              <option value="friend">친구</option>
+              <option value="lover">연인</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>하루 기준 시간대</span>
+            <select data-setting="timezone">
+              <option value="Asia/Seoul">한국시간</option>
+              <option value="America/Los_Angeles">미국 서부</option>
+              <option value="America/New_York">미국 동부</option>
+              <option value="Europe/London">영국</option>
+              <option value="Europe/Paris">유럽 중부</option>
+              <option value="Asia/Tokyo">일본</option>
+            </select>
+          </label>
+          <label class="setting-toggle">
+            <span>다크모드</span>
+            <input type="checkbox" data-setting="dark_mode" />
+          </label>
+          <p class="muted">월별 방명록과 알림 설정은 다음 고도화 단계에서 이곳에 모아둘게요.</p>
         </section>
       </section>
 

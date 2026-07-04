@@ -16,6 +16,21 @@
   font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #171515;
+  --surface: #242020;
+  --ink: #fff8f4;
+  --muted: #b9aaa9;
+  --pencil: #c8bebc;
+  --pink: #ff9bb8;
+  --pink-deep: #ff7da3;
+  --yellow: #f0c95e;
+  --mint: #72c9a3;
+  --line: #fff3ec;
+  --soft-line: rgba(255, 243, 236, 0.18);
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -34,7 +49,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -57,6 +73,10 @@ input:focus {
   border-color: var(--line);
   box-shadow: none;
   background: #fff;
+}
+
+:root[data-theme="dark"] input:focus {
+  background: #201d1d;
 }
 
 .app-shell {
@@ -301,6 +321,11 @@ h3 {
   transition: transform 160ms ease;
 }
 
+.secondary-action--compact {
+  min-height: 42px;
+  font-size: 14px;
+}
+
 .primary-action {
   background: var(--pink);
 }
@@ -396,9 +421,12 @@ h3 {
 }
 
 .setup-panel,
+.profile-panel,
 .prompt-panel,
 .reveal-panel,
-.archive-detail {
+.chat-panel,
+.archive-detail,
+.settings-panel {
   padding: 20px;
   border: 2px solid var(--line);
   border-radius: var(--radius);
@@ -406,9 +434,81 @@ h3 {
   box-shadow: none;
 }
 
+:root[data-theme="dark"] .setup-panel,
+:root[data-theme="dark"] .profile-panel,
+:root[data-theme="dark"] .prompt-panel,
+:root[data-theme="dark"] .reveal-panel,
+:root[data-theme="dark"] .chat-panel,
+:root[data-theme="dark"] .archive-detail,
+:root[data-theme="dark"] .settings-panel,
+:root[data-theme="dark"] .paper-card,
+:root[data-theme="dark"] .status-card,
+:root[data-theme="dark"] .drawing-card,
+:root[data-theme="dark"] .calendar-cell--entry,
+:root[data-theme="dark"] .archive-detail-figure img,
+:root[data-theme="dark"] .drawing-canvas,
+:root[data-theme="dark"] .primary-action,
+:root[data-theme="dark"] .secondary-action,
+:root[data-theme="dark"] .mini-action,
+:root[data-theme="dark"] .tool-button,
+:root[data-theme="dark"] .icon-button,
+:root[data-theme="dark"] .copy-action {
+  background: var(--surface);
+}
+
 .setup-panel {
   display: grid;
   gap: 14px;
+}
+
+.profile-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.profile-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-panel__head h2 {
+  font-size: 20px;
+}
+
+.profile-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.profile-pill {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 2px solid var(--soft-line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.profile-pill.is-selected {
+  border-color: var(--line);
+  color: var(--ink);
+  background: var(--yellow);
+}
+
+.profile-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
 }
 
 .field {
@@ -426,6 +526,19 @@ h3 {
   background: #fff;
   font-size: 18px;
   font-weight: 900;
+}
+
+.field select,
+.settings-panel select {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 14px;
+  border: 2px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 800;
 }
 
 .invite-code-row {
@@ -671,6 +784,97 @@ h3 {
   font-size: 20px;
 }
 
+.chat-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-panel__head h3 {
+  font-size: 19px;
+}
+
+.chat-list {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-empty {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.chat-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 10px 12px;
+  border: 2px solid var(--soft-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.chat-meta {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.chat-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.chat-edit {
+  align-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--pink-deep);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.chat-form {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.emoji-row {
+  display: flex;
+  gap: 7px;
+}
+
+.emoji-row button {
+  width: 38px;
+  height: 38px;
+  border: 2px solid var(--soft-line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 17px;
+}
+
+.emoji-row button.is-selected {
+  border-color: var(--line);
+  background: var(--yellow);
+}
+
 .drawing-pair {
   display: grid;
   gap: 10px;
@@ -730,29 +934,64 @@ h3 {
   padding: 0 16px;
 }
 
+.tool-button.is-selected {
+  background: var(--yellow);
+}
+
 .swatch {
   width: 40px;
   height: 40px;
   flex: 0 0 auto;
   border: 2px solid var(--line);
   border-radius: 999px;
-  background: #30262a;
-}
-
-.swatch--pink {
-  background: #f05d86;
-}
-
-.swatch--yellow {
-  background: #f4b942;
-}
-
-.swatch--mint {
-  background: #55b989;
+  background: var(--swatch, #30262a);
 }
 
 .swatch.is-selected {
   outline: 4px solid var(--yellow);
+}
+
+.tool-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tool-options label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 2px solid var(--soft-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.tool-options input {
+  width: 100%;
+  accent-color: var(--pink-deep);
+}
+
+.settings-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.setting-toggle {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border: 2px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface);
+  font-size: 16px;
+  font-weight: 900;
 }
 
 .calendar-nav {

@@ -3,14 +3,19 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const appState = {
   activeScreen: "welcome",
-  deviceId: getOrCreateDeviceId(),
+  deviceId: getActiveDeviceId(),
+  activeProfileId: getActiveProfileId(),
   user: null,
   today: null,
+  chats: [],
+  selectedEmoji: "",
   archive: [],
   strokes: [],
   activeStroke: null,
+  tool: "pen",
   color: "#30262a",
   width: 10,
+  opacity: 1,
   pollTimer: null,
   submitting: false,
   waitingForPartner: false,
@@ -51,12 +56,131 @@ function getOrCreateDeviceId() {
   return id;
 }
 
+function getProfiles() {
+  const key = "doodle_profiles";
+
+  try {
+    const profiles = JSON.parse(localStorage.getItem(key) || "[]");
+
+    if (Array.isArray(profiles) && profiles.length) {
+      return profiles;
+    }
+  } catch {
+    // Fall through and create a first profile.
+  }
+
+  const firstProfile = {
+    profile_id: crypto.randomUUID(),
+    label: "내 프로필",
+    device_id: getOrCreateDeviceId(),
+  };
+  localStorage.setItem(key, JSON.stringify([firstProfile]));
+  localStorage.setItem("doodle_active_profile_id", firstProfile.profile_id);
+  return [firstProfile];
+}
+
+function saveProfiles(profiles) {
+  localStorage.setItem("doodle_profiles", JSON.stringify(profiles));
+}
+
+function getActiveProfileId() {
+  const profiles = getProfiles();
+  const activeId = localStorage.getItem("doodle_active_profile_id");
+  const activeProfile = profiles.find((profile) => profile.profile_id === activeId) || profiles[0];
+  localStorage.setItem("doodle_active_profile_id", activeProfile.profile_id);
+  return activeProfile.profile_id;
+}
+
+function getActiveProfile() {
+  const profiles = getProfiles();
+  const activeId = getActiveProfileId();
+  return profiles.find((profile) => profile.profile_id === activeId) || profiles[0];
+}
+
+function getActiveDeviceId() {
+  return getActiveProfile().device_id;
+}
+
+function updateActiveProfile(patch) {
+  const profiles = getProfiles();
+  const activeId = getActiveProfileId();
+  const index = profiles.findIndex((profile) => profile.profile_id === activeId);
+
+  if (index >= 0) {
+    profiles[index] = { ...profiles[index], ...patch };
+    saveProfiles(profiles);
+  }
+}
+
+function renderProfiles() {
+  const list = $("[data-profile-list]");
+  const input = $("[data-profile-name]");
+
+  if (!list) return;
+
+  const profiles = getProfiles();
+  const activeId = getActiveProfileId();
+  list.innerHTML = "";
+
+  profiles.forEach((profile) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "profile-pill";
+    button.classList.toggle("is-selected", profile.profile_id === activeId);
+    button.dataset.profileId = profile.profile_id;
+    button.textContent = profile.label || "내 프로필";
+    list.append(button);
+  });
+
+  if (input) {
+    input.value = appState.user?.display_name || getActiveProfile().label || "";
+  }
+}
+
+function addProfile() {
+  const profiles = getProfiles();
+  const nextNumber = profiles.length + 1;
+  const profile = {
+    profile_id: crypto.randomUUID(),
+    label: `프로필 ${nextNumber}`,
+    device_id: crypto.randomUUID(),
+  };
+  profiles.push(profile);
+  saveProfiles(profiles);
+  localStorage.setItem("doodle_active_profile_id", profile.profile_id);
+  appState.activeProfileId = profile.profile_id;
+  appState.deviceId = profile.device_id;
+  appState.user = null;
+  appState.today = null;
+  appState.strokes = [];
+  renderProfiles();
+  bootstrap();
+}
+
+async function switchProfile(profileId) {
+  const profile = getProfiles().find((item) => item.profile_id === profileId);
+
+  if (!profile || profile.profile_id === getActiveProfileId()) return;
+
+  localStorage.setItem("doodle_active_profile_id", profile.profile_id);
+  appState.activeProfileId = profile.profile_id;
+  appState.deviceId = profile.device_id;
+  appState.user = null;
+  appState.today = null;
+  appState.strokes = [];
+  stopPolling();
+  renderProfiles();
+  await bootstrap();
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
       "X-Device-Id": appState.deviceId,
+      "X-Relationship-Type": localStorage.getItem("doodle_setting_relationship_type") || "close",
+      "X-Time-Zone": localStorage.getItem("doodle_setting_timezone") || "Asia/Seoul",
       ...(options.headers || {}),
     },
   });
@@ -108,8 +232,8 @@ function openPairing(mode = "join") {
   if (helper) {
     helper.textContent =
       mode === "create"
-        ? "내 코드를 상대에게 보내면 같은 방으로 연결돼요."
-        : "상대가 보내준 코드를 입력하면 같은 방으로 연결돼요.";
+        ? "내 코드를 보내면 같은 낙서방으로 연결돼요."
+        : "받은 코드를 입력하면 같은 낙서방으로 연결돼요.";
   }
 
   showScreen("pairing");
@@ -130,30 +254,46 @@ function statusLabel(status) {
 
 async function bootstrap() {
   try {
+    renderProfiles();
     const payload = await api("/api/session", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ display_name: getActiveProfile().label }),
     });
     appState.user = payload.user;
-    await loadToday();
+    updateActiveProfile({ label: payload.user.display_name });
+    renderProfiles();
+    await loadToday({ navigate: false });
+    showScreen("welcome");
   } catch (error) {
     showToast(error.message);
   }
 }
 
-async function loadToday() {
+async function loadToday(options = {}) {
+  const shouldNavigate = options.navigate !== false;
   const payload = await api("/api/today");
   appState.today = payload;
 
   if (!payload.couple) {
-    await showWaitingOrWelcome();
+    updateHomeAccess(false);
+    if (shouldNavigate) await showWaitingOrWelcome();
     return;
   }
 
+  updateHomeAccess(true);
   appState.waitingForPartner = false;
   renderToday();
-  showScreen("today");
-  startPolling(refreshTodaySilently);
+  await loadChats(payload.date);
+
+  if (shouldNavigate) {
+    showScreen("today");
+    startPolling(refreshTodaySilently);
+  }
+}
+
+function updateHomeAccess(hasRoom) {
+  const enterButton = $('[data-action="enter-today"]');
+  if (enterButton) enterButton.hidden = !hasRoom;
 }
 
 async function showWaitingOrWelcome() {
@@ -191,6 +331,7 @@ async function refreshTodaySilently() {
 
     if (payload.couple) {
       renderToday();
+      await loadChats(payload.date);
     } else {
       await showWaitingOrWelcome();
     }
@@ -288,6 +429,107 @@ function renderDrawingCard(label, drawing) {
   card.append(image);
 
   return card;
+}
+
+async function loadChats(date) {
+  if (!appState.today?.couple || !date) {
+    appState.chats = [];
+    renderChats();
+    return;
+  }
+
+  const payload = await api(`/api/chats?date=${encodeURIComponent(date)}`);
+  appState.chats = payload.chats || [];
+  renderChats();
+}
+
+function renderChats() {
+  const list = $("[data-chat-list]");
+
+  if (!list) return;
+
+  list.innerHTML = "";
+
+  if (!appState.chats.length) {
+    const empty = document.createElement("p");
+    empty.className = "chat-empty";
+    empty.textContent = "아직 댓글이 없어요. 그림을 보고 떠오른 말을 남겨보세요.";
+    list.append(empty);
+    return;
+  }
+
+  appState.chats.forEach((chat) => {
+    const item = document.createElement("article");
+    item.className = "chat-item";
+
+    const meta = document.createElement("p");
+    meta.className = "chat-meta";
+    meta.textContent = chat.profile_name || "끄적러";
+    item.append(meta);
+
+    const body = document.createElement("p");
+    body.className = "chat-body";
+    body.textContent = `${chat.emoji ? `${chat.emoji} ` : ""}${chat.text || ""}`.trim();
+    item.append(body);
+
+    if (chat.can_edit) {
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "chat-edit";
+      edit.dataset.chatId = chat.chat_id;
+      edit.textContent = "수정";
+      item.append(edit);
+    }
+
+    list.append(item);
+  });
+}
+
+async function createChat(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const input = form.elements.chat_text;
+  const text = String(input.value || "").trim();
+
+  await api("/api/chats", {
+    method: "POST",
+    body: JSON.stringify({
+      date: appState.today?.date,
+      text,
+      emoji: appState.selectedEmoji,
+    }),
+  });
+  input.value = "";
+  appState.selectedEmoji = "";
+  updateEmojiSelection();
+  showToast("댓글을 남겼어요.");
+  await loadChats(appState.today?.date);
+}
+
+async function editChat(chatId) {
+  const chat = appState.chats.find((item) => item.chat_id === chatId);
+
+  if (!chat) return;
+
+  const text = window.prompt("댓글을 수정해 주세요.", chat.text || "");
+  if (text === null) return;
+
+  await api("/api/chats/update", {
+    method: "POST",
+    body: JSON.stringify({
+      chat_id: chat.chat_id,
+      text,
+      emoji: chat.emoji,
+    }),
+  });
+  showToast("댓글을 수정했어요.");
+  await loadChats(appState.today?.date);
+}
+
+function updateEmojiSelection() {
+  $$("[data-chat-emoji]").forEach((button) => {
+    button.classList.toggle("is-selected", button.dataset.chatEmoji === appState.selectedEmoji);
+  });
 }
 
 function parseDateKey(dateKey) {
@@ -489,13 +731,15 @@ function setDetailImage(who, drawing) {
 
 async function saveDisplayName(event) {
   event.preventDefault();
-  const displayName = new FormData(event.currentTarget).get("display_name");
+  const displayName = String(new FormData(event.currentTarget).get("display_name") || "").trim();
   const payload = await api("/api/session", {
     method: "POST",
     body: JSON.stringify({ display_name: displayName }),
   });
   appState.user = payload.user;
-  showToast("이름을 저장했어요.");
+  updateActiveProfile({ label: payload.user.display_name });
+  renderProfiles();
+  showToast("닉네임을 저장했어요.");
 }
 
 function fillInviteCode(code) {
@@ -508,9 +752,10 @@ function fillInviteCode(code) {
 }
 
 async function createInvite() {
+  const displayName = $("[data-profile-name]")?.value?.trim() || appState.user?.display_name || getActiveProfile().label;
   const payload = await api("/api/invites", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ display_name: displayName }),
   });
   fillInviteCode(payload.invite.code);
   appState.waitingForPartner = true;
@@ -545,9 +790,10 @@ async function copyInviteCode() {
 async function acceptInvite(event) {
   event.preventDefault();
   const code = new FormData(event.currentTarget).get("invite_code");
+  const displayName = $("[data-profile-name]")?.value?.trim() || appState.user?.display_name || getActiveProfile().label;
   await api("/api/invites/accept", {
     method: "POST",
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, display_name: displayName }),
   });
   showToast("둘만의 방이 연결됐어요.");
   await loadToday();
@@ -653,9 +899,13 @@ function startStroke(event) {
   const canvas = event.currentTarget;
   canvas.setPointerCapture(event.pointerId);
   const point = canvasPoint(event);
+  const isEraser = appState.tool === "eraser";
+  const isMarker = appState.tool === "marker";
   appState.activeStroke = {
-    color: appState.color,
-    width: appState.width,
+    tool: appState.tool,
+    color: isEraser ? "#ffffff" : appState.color,
+    width: isEraser ? Math.max(appState.width * 1.55, 18) : appState.width,
+    opacity: isEraser ? 1 : isMarker ? Math.min(appState.opacity, 0.55) : appState.opacity,
     points: [point],
   };
   appState.strokes.push(appState.activeStroke);
@@ -684,6 +934,8 @@ function redrawCanvas() {
   context.lineJoin = "round";
 
   appState.strokes.forEach((stroke) => {
+    context.save();
+    context.globalAlpha = stroke.opacity ?? 1;
     context.strokeStyle = stroke.color;
     context.lineWidth = stroke.width;
 
@@ -693,6 +945,7 @@ function redrawCanvas() {
       context.arc(point.x, point.y, stroke.width / 2, 0, Math.PI * 2);
       context.fillStyle = stroke.color;
       context.fill();
+      context.restore();
       return;
     }
 
@@ -702,6 +955,7 @@ function redrawCanvas() {
       else context.lineTo(point.x, point.y);
     });
     context.stroke();
+    context.restore();
   });
 }
 
@@ -758,6 +1012,13 @@ function wireEvents() {
     openPairing("create");
     await createInvite();
   }));
+  $('[data-action="enter-today"]').addEventListener("click", safe(() => loadToday()));
+  $('[data-action="add-profile"]').addEventListener("click", addProfile);
+  $("[data-profile-list]").addEventListener("click", safe(async (event) => {
+    const button = event.target.closest("[data-profile-id]");
+    if (!button) return;
+    await switchProfile(button.dataset.profileId);
+  }));
   $('[data-action="back-welcome"]').addEventListener("click", () => {
     appState.waitingForPartner = false;
     stopPolling();
@@ -776,6 +1037,19 @@ function wireEvents() {
   $('[data-action="refresh"]').addEventListener("click", safe(loadToday));
   $('[data-action="poke"]').addEventListener("click", safe(pokePartner));
   $('[data-action="open-archive"]').addEventListener("click", safe(openArchive));
+  $('[data-action="open-settings"]').addEventListener("click", () => showScreen("settings"));
+  $('[data-form="chat"]').addEventListener("submit", safe(createChat));
+  $("[data-chat-list]").addEventListener("click", safe(async (event) => {
+    const button = event.target.closest("[data-chat-id]");
+    if (!button) return;
+    await editChat(button.dataset.chatId);
+  }));
+  $$("[data-chat-emoji]").forEach((button) => {
+    button.addEventListener("click", () => {
+      appState.selectedEmoji = appState.selectedEmoji === button.dataset.chatEmoji ? "" : button.dataset.chatEmoji;
+      updateEmojiSelection();
+    });
+  });
   $('[data-action="archive-prev-month"]').addEventListener("click", () => changeArchiveMonth(-1));
   $('[data-action="archive-next-month"]').addEventListener("click", () => changeArchiveMonth(1));
   $("[data-today-primary-row]").addEventListener("click", safe(async (event) => {
@@ -808,7 +1082,42 @@ function wireEvents() {
   $$("[data-color]").forEach((button) => {
     button.addEventListener("click", () => {
       appState.color = button.dataset.color;
+      appState.tool = appState.tool === "eraser" ? "pen" : appState.tool;
       $$("[data-color]").forEach((item) => item.classList.toggle("is-selected", item === button));
+      $$("[data-tool]").forEach((item) => item.classList.toggle("is-selected", item.dataset.tool === appState.tool));
+    });
+  });
+  $$("[data-tool]").forEach((button) => {
+    button.addEventListener("click", () => {
+      appState.tool = button.dataset.tool;
+      $$("[data-tool]").forEach((item) => item.classList.toggle("is-selected", item === button));
+    });
+  });
+  $("[data-tool-width]").addEventListener("input", (event) => {
+    appState.width = Number(event.currentTarget.value);
+  });
+  $("[data-tool-opacity]").addEventListener("input", (event) => {
+    appState.opacity = Number(event.currentTarget.value) / 100;
+  });
+  $$("[data-setting]").forEach((input) => {
+    const saved = localStorage.getItem(`doodle_setting_${input.dataset.setting}`);
+
+    if (saved != null) {
+      if (input.type === "checkbox") input.checked = saved === "true";
+      else input.value = saved;
+    }
+
+    if (input.dataset.setting === "dark_mode") {
+      document.documentElement.dataset.theme = input.checked ? "dark" : "light";
+    }
+
+    input.addEventListener("change", () => {
+      const value = input.type === "checkbox" ? String(input.checked) : input.value;
+      localStorage.setItem(`doodle_setting_${input.dataset.setting}`, value);
+      if (input.dataset.setting === "dark_mode") {
+        document.documentElement.dataset.theme = input.checked ? "dark" : "light";
+      }
+      showToast("설정을 저장했어요.");
     });
   });
 }
