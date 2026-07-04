@@ -408,6 +408,15 @@ h3 {
   white-space: nowrap;
 }
 
+.copy-action--email {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
 .plain-action {
   appearance: none;
   border: 0;

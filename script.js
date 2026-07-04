@@ -966,19 +966,12 @@ async function createInvite() {
   showToast("초대 코드가 준비됐어요. 상대가 들어오면 자동으로 연결돼요.");
 }
 
-async function copyInviteCode() {
-  const code = $("[data-invite-code]")?.textContent?.trim();
-
-  if (!code) {
-    showToast("먼저 초대 코드를 만들어 주세요.");
-    return;
-  }
-
+async function copyToClipboard(text) {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(code);
+    await navigator.clipboard.writeText(text);
   } else {
     const textarea = document.createElement("textarea");
-    textarea.value = code;
+    textarea.value = text;
     textarea.setAttribute("readonly", "");
     textarea.style.position = "fixed";
     textarea.style.opacity = "0";
@@ -987,7 +980,26 @@ async function copyInviteCode() {
     document.execCommand("copy");
     textarea.remove();
   }
+}
+
+async function copyInviteCode() {
+  const code = $("[data-invite-code]")?.textContent?.trim();
+
+  if (!code) {
+    showToast("먼저 초대 코드를 만들어 주세요.");
+    return;
+  }
+
+  await copyToClipboard(code);
   showToast("초대 코드를 복사했어요.");
+}
+
+async function copySupportEmail(event) {
+  const email = event.currentTarget.dataset.email;
+  if (!email) return;
+
+  await copyToClipboard(email);
+  showToast("메일 주소를 복사했어요.");
 }
 
 async function acceptInvite(event) {
@@ -1019,11 +1031,11 @@ async function refreshStorageStatus() {
     const status = await api("/api/google/status");
 
     if (status.drive_write_ok && status.sheets_database_ok !== false) {
-      statusEl.textContent = "✅ 그림과 기록이 Google에 안전하게 저장되고 있어요.";
+      statusEl.textContent = "✅ 그림과 기록이 안전하게 저장되고 있어요.";
     } else if (status.configured) {
-      statusEl.textContent = "⚠️ Google 연결은 되어 있지만 일부 저장이 제한되고 있어요.";
+      statusEl.textContent = "⚠️ 저장 연결은 되어 있지만 일부 저장이 제한되고 있어요.";
     } else {
-      statusEl.textContent = "⚠️ Google 저장이 아직 설정되지 않아 기기에만 임시 저장돼요.";
+      statusEl.textContent = "⚠️ 저장이 아직 설정되지 않아 기기에만 임시 저장돼요.";
     }
   } catch {
     statusEl.textContent = "저장 상태를 불러오지 못했어요.";
@@ -1292,6 +1304,7 @@ function wireEvents() {
     refreshStorageStatus().catch(() => {});
   });
   $('[data-action="leave-couple"]').addEventListener("click", safe(leaveCouple));
+  $('[data-action="copy-support-email"]').addEventListener("click", safe(copySupportEmail));
   $('[data-form="chat"]').addEventListener("submit", safe(createChat));
   $('[data-form="guestbook"]').addEventListener("submit", safe(createGuestbookEntry));
   $("[data-guestbook-list]").addEventListener("click", safe(async (event) => {
